@@ -20,6 +20,13 @@ interface TimeSlot {
 interface ErrorMap {
   [key: string]: string;
 }
+interface User {
+  username?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  [key: string]: string | undefined;
+}
 
 const DAYS: DayName[] = [
   "Monday",
@@ -93,6 +100,78 @@ const LocationPicker = ({
   const [marker, setMarker] = useState<LMarker |null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [user, setUser] = useState<{
+    username?: string;
+    isLoggedIn?: boolean;
+    role?: string;
+    email?: string;
+  } | null>(null);
+
+
+
+
+
+
+  useEffect(() => {
+          const loadUserData = () => {
+            try {
+              const getFromStorage = (key: string) =>
+                sessionStorage.getItem(key) || localStorage.getItem(key);
+      
+              const storedUser = getFromStorage('user');
+              const storedIsLoggedIn = getFromStorage('isLoggedIn');
+      
+              let parsedUser: User | null = null;
+              let username: string = "";
+                let role: string = "";
+                let email: string = "";
+      
+              if (storedUser) {
+                try {
+                  parsedUser = JSON.parse(storedUser);
+                  username = parsedUser?.username || parsedUser?.name || parsedUser?.email?.split('@')[0] || 'User';
+                    role = parsedUser?.role || 'customer';
+                      email = parsedUser?.email || '';
+                } catch (e) {
+                  console.error('Error parsing user data:', e);
+                }
+              }
+      
+              const isLoggedIn = !!parsedUser || storedIsLoggedIn === 'true';
+      
+              if (isLoggedIn && username) {
+                setUser({
+                  username,
+                  isLoggedIn: true,
+                    role: role,
+                      email: email,
+                });
+              } else {
+                setUser({ isLoggedIn: false });
+              }
+            } catch (err) {
+              console.error('Error loading user data:', err);
+              setUser({ isLoggedIn: false });
+            }
+          };
+      
+          loadUserData();
+          const timeoutId = setTimeout(loadUserData, 200);
+      
+          const handleStorageChange = (e: StorageEvent) => {
+            if (['user', 'isLoggedIn'].includes(e.key || '')) {
+              loadUserData();
+            }
+          };
+      
+          window.addEventListener('storage', handleStorageChange);
+          return () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener('storage', handleStorageChange);
+          };
+  }, []);
+  
+  const email = user?.email || '';
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -195,12 +274,12 @@ const LocationPicker = ({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
+    <div className="space-y-4 py-3 md:py-auto">
+      <div className="md:flex md:flex-row sm:flex sm:flex-col sm:gap-4 ">
         <button
           type="button"
           onClick={getCurrentLocation}
-          className="px-4 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium flex items-center gap-2"
+          className="px-4 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium flex items-center gap-2 mb-4 md:mb-auto w-full md:w-auto"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -224,13 +303,13 @@ const LocationPicker = ({
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyPress={(e) => e.key === "Enter" && handleSearch()}
           placeholder="Search for area, street name..."
-          className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4 md:mb-auto w-full md:w-auto"
         />
         <button
           type="button"
           onClick={handleSearch}
           disabled={isSearching}
-          className="px-6 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition font-medium disabled:opacity-50"
+          className="px-6 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition font-medium disabled:opacity-50 w-full md:w-auto"
         >
           {isSearching ? "Searching..." : "Search"}
         </button>
@@ -345,6 +424,42 @@ export default function OnboardingForm() {
     ifsc_code: "",
     account_type: "savings",
   });
+
+
+  useEffect(() => {
+    // Helper to safely get from storage
+    const getFromStorage = (key: string) =>
+      typeof window !== 'undefined' ? (sessionStorage.getItem(key) || localStorage.getItem(key)) : null;
+
+    let email = '';
+
+    // First, try to get email from 'user' object (JSON string)
+    const storedUser = getFromStorage('user');
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        if (parsed && typeof parsed === 'object' && parsed.email && typeof parsed.email === 'string') {
+          email = parsed.email.trim();
+        }
+      } catch (e) {
+        console.warn('Failed to parse user from storage:', e);
+      }
+    }
+
+    // Fallback: check if 'email' is stored directly
+    if (!email) {
+      const directEmail = getFromStorage('email');
+      if (directEmail) {
+        email = directEmail.trim();
+      }
+    }
+
+    // Prefill only if valid email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email && emailRegex.test(email)) {
+      setFormData((prev) => ({ ...prev, email }));
+    }
+  }, []);
   const [errors, setErrors] = useState<ErrorMap>({});
   const [previewImages, setPreviewImages] = useState({
     logo_url: null,
@@ -908,11 +1023,9 @@ export default function OnboardingForm() {
                         <input
                           type="email"
                           value={formData.email}
-                          onChange={(e) => updateField("email", e.target.value)}
-                          className={`w-full px-4 py-3 border ${
-                            errors.email ? "border-red-500" : "border-gray-300"
-                          } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent`}
-                          placeholder="your@email.com"
+                          readOnly
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-0 focus:border-gray-300 bg-gray-300"
+                          placeholder="your@gmail.com"
                         />
                         {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
                       </div>
