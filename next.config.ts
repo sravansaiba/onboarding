@@ -1,21 +1,17 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-    images: {
-    unoptimized: true, 
+  outputFileTracingRoot: __dirname,
+  turbopack: {
+    root: __dirname,
   },
-  
-  
-  async rewrites() {
-    if (process.env.NODE_ENV === "development") {
-      return [
-        {
-          source: "/uploads/:path*",
-          destination: "https://onboarding-apis.app.f2c.io/uploads/:path*", 
-        },
-      ];
-    }
-    return [];
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "8mb",
+    },
+  },
+  images: {
+    unoptimized: true,
   },
 };
 

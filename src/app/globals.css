@@ -6,6 +6,21 @@
   html {
     scroll-behavior: smooth;
   }
+
+  body {
+    font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  [role="button"],
+  a,
+  summary,
+  select,
+  input[type="checkbox"],
+  input[type="radio"] {
+    cursor: pointer;
+  }
 }
 
 @layer components {
@@ -73,4 +88,3 @@
 .hide-scrollbar {
   -ms-overflow-style: none;
 }
-

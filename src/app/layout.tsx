@@ -23,18 +23,6 @@
 
 
 import './globals.css';
-import { Inter } from 'next/font/google';
-import { Header } from '../layout/Header';
-import { Footer } from '../layout/Footer';
-import { Manrope } from "next/font/google"; 
-
-
-// const inter = Inter({ subsets: ['latin'] });
-const manrope = Manrope({
-  subsets: ["latin"],
-  weight: ["200", "300", "400", "500", "600", "700", "800"],
-  display: "swap",
-});
 
 export const metadata = {
   title: 'Partner with Us - marinate360',
@@ -48,7 +36,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={manrope.className}>
+      <body>
         <div className="min-h-screen flex flex-col">
           {/* <Header /> */}
           <div className="grow">{children}</div>
@@ -58,7 +46,6 @@ export default function RootLayout({
     </html>
   );
 }
-
 
 
 

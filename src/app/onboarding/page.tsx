@@ -4,6 +4,8 @@
 import { useState, useEffect } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import { Map as LMap, Marker as LMarker } from 'leaflet';
+import { submitOnboardingApplication } from "@/src/app/actions/onboarding-applications";
+import { supabase } from "@/src/lib/supabase/client";
 
 // Define types for clarity
 type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday";
@@ -20,6 +22,15 @@ interface TimeSlot {
 interface ErrorMap {
   [key: string]: string;
 }
+
+interface ResolvedAddress {
+  buildingno?: string;
+  area?: string;
+  city?: string;
+  pincode?: string;
+  landmark?: string;
+}
+
 interface User {
   username?: string;
   name?: string;
@@ -91,9 +102,11 @@ const TIME_SLOTS = [
 // Map Component
 const LocationPicker = ({
   onLocationSelect,
+  onAddressResolved,
   initialLocation,
 }: {
   onLocationSelect: (lat: number, lng: number) => void;
+  onAddressResolved: (address: ResolvedAddress) => void;
   initialLocation: { lat: number; lng: number } | null;
 }) => {
   const [map, setMap] = useState<LMap|null>(null); 
@@ -106,6 +119,43 @@ const LocationPicker = ({
     role?: string;
     email?: string;
   } | null>(null);
+  void user;
+
+  const normalizeAddress = (address?: Record<string, string>): ResolvedAddress => {
+    if (!address) return {};
+
+    return {
+      buildingno: [address.house_number, address.road].filter(Boolean).join(" ").trim(),
+      area:
+        address.suburb ||
+        address.neighbourhood ||
+        address.city_district ||
+        address.county ||
+        address.road ||
+        "",
+      city:
+        address.city ||
+        address.town ||
+        address.village ||
+        address.municipality ||
+        address.state_district ||
+        "",
+      pincode: address.postcode || "",
+      landmark: address.neighbourhood || address.suburb || address.amenity || "",
+    };
+  };
+
+  const resolveAddressFromCoordinates = async (lat: number, lng: number) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1`
+      );
+      const data = await response.json();
+      onAddressResolved(normalizeAddress(data?.address));
+    } catch (error) {
+      console.error("Reverse geocode error:", error);
+    }
+  };
 
 
 
@@ -171,8 +221,6 @@ const LocationPicker = ({
           };
   }, []);
   
-  const email = user?.email || '';
-
   useEffect(() => {
     if (typeof window !== "undefined") {
       import("leaflet").then((L) => {
@@ -200,11 +248,13 @@ const LocationPicker = ({
         markerInstance.on("dragend", (e: any) => {
           const position = e.target.getLatLng();
           onLocationSelect(position.lat, position.lng);
+          void resolveAddressFromCoordinates(position.lat, position.lng);
         });
 
         mapInstance.on("click", (e: any) => {
           markerInstance.setLatLng(e.latlng);
           onLocationSelect(e.latlng.lat, e.latlng.lng);
+          void resolveAddressFromCoordinates(e.latlng.lat, e.latlng.lng);
         });
 
         setMap(mapInstance);
@@ -229,7 +279,7 @@ const LocationPicker = ({
     setIsSearching(true);
     try {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}`
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&q=${encodeURIComponent(searchQuery)}`
       );
       const data = await response.json();
       if (data && data.length > 0) {
@@ -238,6 +288,7 @@ const LocationPicker = ({
           map.setView([parseFloat(lat), parseFloat(lon)], 15);
           marker.setLatLng([parseFloat(lat), parseFloat(lon)]);
           onLocationSelect(parseFloat(lat), parseFloat(lon));
+          onAddressResolved(normalizeAddress(data[0]?.address));
           toast.success("Location found!");
         }
       } else {
@@ -260,6 +311,7 @@ const LocationPicker = ({
             map.setView([latitude, longitude], 15);
             marker.setLatLng([latitude, longitude]);
             onLocationSelect(latitude, longitude);
+            void resolveAddressFromCoordinates(latitude, longitude);
             toast.success("Current location set!");
           }
         },
@@ -586,8 +638,8 @@ export default function OnboardingForm() {
   const handleFileUpload = (field: keyof FormDataState, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("File size should be less than 5MB");
+      if (file.size > 8 * 1024 * 1024) {
+        toast.error("File size should be less than 8MB");
         return;
       }
       updateField(field, file);
@@ -686,30 +738,12 @@ export default function OnboardingForm() {
     }
   };
 
-  // Function to upload a single file to Strapi
-  const uploadFileToStrapi = async (file: File) => { // Changed parameter type to File
-    const formDataForUpload = new FormData();
-    formDataForUpload.append("files", file);
-    try {
-      const response = await fetch("https://onboarding-apis.app.f2c.io/api/upload", {
-        method: "POST",
-        body: formDataForUpload,
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: "Unknown error" }));
-        throw new Error(`Upload failed: ${response.status} - ${errorData.error?.message || errorData.message}`);
-      }
-      const result = await response.json();
-      // Assuming the API returns an array, get the first file object
-      const uploadedFile = result[0];
-      if (!uploadedFile || !uploadedFile.id) {
-        throw new Error("Upload response did not contain file ID");
-      }
-      return uploadedFile.id;
-    } catch (error) {
-      console.error("Error uploading file:", error);
-      throw error;
-    }
+  const handleAddressResolved = (address: ResolvedAddress) => {
+    if (address.buildingno) updateField("buildingno", address.buildingno);
+    if (address.area) updateField("area", address.area);
+    if (address.city) updateField("city", address.city);
+    if (address.pincode) updateField("pincode", address.pincode.replace(/\D/g, "").slice(0, 6));
+    if (address.landmark) updateField("landmark", address.landmark);
   };
 
   const handleSubmit = async () => {
@@ -719,25 +753,7 @@ export default function OnboardingForm() {
     }
     const loadingToast = toast.loading("Submitting registration...");
     try {
-      // 1. Upload all files first
-      const uploadedFileIds: Partial<Record<keyof FormDataState, number>> = {}; // Use Partial Record
-      if (formData.logo_url) {
-        uploadedFileIds.logo_url = await uploadFileToStrapi(formData.logo_url);
-      }
-      if (formData.background_image_url) {
-        uploadedFileIds.background_image_url = await uploadFileToStrapi(formData.background_image_url);
-      }
-      if (formData.pan_card) {
-        uploadedFileIds.pan_card = await uploadFileToStrapi(formData.pan_card);
-      }
-      if (formData.gst_certificate) {
-        uploadedFileIds.gst_certificate = await uploadFileToStrapi(formData.gst_certificate);
-      }
-      if (formData.fssai_license) {
-        uploadedFileIds.fssai_license = await uploadFileToStrapi(formData.fssai_license);
-      }
-
-      // 2. Build restaurant hours (object format)
+      // Build restaurant hours (object format)
       const restaurantHours: Partial<Record<DayName, TimeSlot[]>> = {}; // Use Partial Record
       if (formData.restaurant_timing_mode === "all_days") {
         DAYS.forEach((day) => {
@@ -756,7 +772,7 @@ export default function OnboardingForm() {
         });
       }
 
-      // 3. Build delivery hours (object format)
+      // Build delivery hours (object format)
       const deliveryHours: Partial<Record<DayName, TimeSlot[]>> = {}; // Use Partial Record
       if (formData.services.includes("delivery")) {
         if (formData.delivery_timing_mode === "same_time") {
@@ -779,7 +795,7 @@ export default function OnboardingForm() {
         }
       }
 
-      // 4. Build takeaway hours (object format)
+      // Build takeaway hours (object format)
       const takeawayHours: Partial<Record<DayName, TimeSlot[]>> = {}; // Use Partial Record
       if (formData.services.includes("takeaway")) {
         if (formData.takeaway_timing_mode === "same_time") {
@@ -803,8 +819,17 @@ export default function OnboardingForm() {
         }
       }
       
-      // 5. Build the main payload
+      const session = await supabase.auth.getSession();
+      const accessToken =
+        session.data.session?.access_token ||
+        localStorage.getItem("accessToken") ||
+        sessionStorage.getItem("accessToken") ||
+        "";
+      const normalizedPackage = packagename === "food-truck" ? "marinate-foodtruck" : packagename || "marinate-menu";
+
+      // Build the main payload
       const payload: Record<string, any> = { // Using Record<string, any> for flexibility
+        accessToken,
         restaurant_name: formData.restaurant_name,
         fullname: formData.fullname,
         email: formData.email,
@@ -820,9 +845,8 @@ export default function OnboardingForm() {
         pincode: formData.pincode,
         landmark: formData.landmark,
         mapEmbedUrl: `[${formData.latitude},${formData.longitude}]`,
-        // Format cuisines and services as JSON strings as expected by the backend
-        cuisines: JSON.stringify(formData.cuisines.map((c) => c.toLowerCase())), // Convert to lowercase if backend expects it
-        services: JSON.stringify(formData.services.map((s) => s.toLowerCase())), // Convert to lowercase if backend expects it
+        cuisines: formData.cuisines.map((c) => c.toLowerCase()),
+        services: formData.services.map((s) => s.toLowerCase()),
         timings: { hours: restaurantHours },
         pan_number: formData.pan_number,
         fullnameaspan: formData.fullnameaspan,
@@ -834,15 +858,8 @@ export default function OnboardingForm() {
         bank_accno: formData.bank_accno,
         ifsc_code: formData.ifsc_code,
         account_type: formData.account_type,
-        package: packagename,
+        package: normalizedPackage,
       };
-
-      // Add file IDs to the payload
-      if (uploadedFileIds.logo_url) payload.logo_url = { id: uploadedFileIds.logo_url };
-      if (uploadedFileIds.background_image_url) payload.background_image_url = { id: uploadedFileIds.background_image_url };
-      if (uploadedFileIds.pan_card) payload.pan_card = { id: uploadedFileIds.pan_card };
-      if (uploadedFileIds.gst_certificate) payload.gst_certificate = { id: uploadedFileIds.gst_certificate };
-      if (uploadedFileIds.fssai_license) payload.fssai_license = { id: uploadedFileIds.fssai_license };
 
       // Add delivery and takeaway timings if applicable
       if (Object.keys(deliveryHours).length > 0) {
@@ -853,31 +870,27 @@ export default function OnboardingForm() {
       }
 
       // 6. Send the main payload
-      const token = localStorage.getItem("authToken"); // Assuming token is stored in localStorage
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-      console.log("Submitting main payload:", payload);
-      const response = await fetch("https://onboarding-apis.app.f2c.io/api/onboardapis", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ data: payload }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: "Unknown error" }));
-        throw new Error(`API request failed: ${response.status} - ${errorData.error?.message || errorData.message}`);
-      }
-      const result = await response.json();
-      console.log("Submission result:", result);
+      const registrationForm = new FormData();
+      registrationForm.append("payload", JSON.stringify(payload));
+      if (formData.logo_url) registrationForm.append("logo_url", formData.logo_url);
+      if (formData.background_image_url) registrationForm.append("background_image_url", formData.background_image_url);
+      if (formData.pan_card) registrationForm.append("pan_card", formData.pan_card);
+      if (formData.gst_certificate) registrationForm.append("gst_certificate", formData.gst_certificate);
+      if (formData.fssai_license) registrationForm.append("fssai_license", formData.fssai_license);
+
+      const result = await submitOnboardingApplication(registrationForm);
+      if (!result.ok) throw new Error(result.error);
       toast.dismiss(loadingToast);
-      toast.success("Registration completed successfully! 🎉");
+      toast.success("Registration submitted successfully.");
       window.location.href = "/dashboard";
     } catch (error: any) {
       toast.dismiss(loadingToast);
-      toast.error(`Registration failed. Please try again. Error: ${error.message}`);
+      const errorMessage = String(error?.message || "Unable to submit your application.");
+      if (errorMessage.toLowerCase().includes("body exceeded") || errorMessage.toLowerCase().includes("payload")) {
+        toast.error("Some uploaded files are too large for one submission. Please keep each file under 8MB and try again.");
+      } else {
+        toast.error(errorMessage);
+      }
       console.error("Error:", error);
     }
   };
@@ -1115,6 +1128,7 @@ export default function OnboardingForm() {
                     <p className="text-gray-600 mb-6">Pin your exact location on the map</p>
                     <LocationPicker
                       onLocationSelect={handleLocationSelect}
+                      onAddressResolved={handleAddressResolved}
                       initialLocation={
                         formData.latitude && formData.longitude
                           ? {

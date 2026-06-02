@@ -1,780 +1,265 @@
-// 'use client';
-
-// import { useState, useEffect } from 'react';
-// import { useRouter } from 'next/navigation';
-// import { Header } from '../layout/Header';
-// import { Footer } from '../layout/Footer';
-
-
-//   function QrCodeIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M3 3h4v4H3V3zm6 6h4v4H9V9zm-6 6h4v4H3v-4zm12-12h4v4h-4V3zm-6 6h4v4h-4v-4zm6 0h4v4h-4v-4zm-6 6h4v4h-4v-4zm6 0h4v4h-4v-4zm-6 6h4v4H9v-4zm6 0h4v4h-4v-4zm6 0h2v2h-2v-2zm0-6h2v2h-2v-2zm0-6h2v2h-2v-2z" />
-//       </svg>
-//     );
-//   }
-
-//   function KotSystemIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
-//       </svg>
-//     );
-//   }
-
-//   function AnalyticsIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-5h2v5zm4 0h-2v-3h2v3zm0-5h-2v-2h2v2zm4 5h-2V7h2v10z" />
-//       </svg>
-//     );
-//   }
-
-//   function MultiLocationIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z" />
-//       </svg>
-//     );
-//   }
-
-//   function AllInOneIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8 14H7v-2h4v2zm0-4H7v-2h4v2zm0-4H7V7h4v2zm6 8h-4v-2h4v2zm0-4h-4v-2h4v2zm0-4h-4V7h4v2z" />
-//       </svg>
-//     );
-//   }
-
-//   function GroupOrderingIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-//       </svg>
-//     );
-//   }
-
-//   function DineInIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
-//       </svg>
-//     );
-//   }
-
-
-//   function TakeawayIcon() {
-//     return (
-//       <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" viewBox="0 0 24 24" fill="currentColor">
-//         <path d="M18 6h-2c0-2.21-1.79-4-4-4S8 3.79 8 6H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6-2c1.1 0 2 .89 2 2h-4c0-1.11.9-2 2-2zm6 14H6V8h2v2c0 .55.45 1 1 1s1-.45 1-1V8h4v2c0 .55.45 1 1 1s1-.45 1-1V8h2v10z" />
-//       </svg>
-//     );
-//   }
-
-
-
-
-// export default function HomePage() {
-//   const router = useRouter();
-//   const [isLoggedIn, setIsLoggedIn] = useState(false);
-//   const [showServiceModal, setShowServiceModal] = useState(false);
-
-//   // package selection & accordion
-//   const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
-//   const [expandedPackage, setExpandedPackage] = useState<string | null>(null);
-
-//   useEffect(() => {
-//     const loginStatus = localStorage.getItem('isLoggedIn') === 'true';
-//     setIsLoggedIn(loginStatus);
-//   },[setIsLoggedIn]);
-
-//   const PACKAGE_MAP: Record<string, { label: string; points: string[]; services: string[]; icon: React.ComponentType; price?: string }> = {
-//     'marinate-menu': {
-//       label: 'Marinate — Menu',
-//       points: [
-//         'Unlimited QR Code Menu Generation',
-//         'Easy Menu Management with Bulk Upload',
-//         'Mobile-Responsive Menus & Basic Reports'
-//       ],
-//       services: ['dine_in','takeaway'],
-//       icon: DineInIcon,
-//     },
-//     'marinate-dinein': {
-//       label: 'Marinate — Dine-in',
-//       points: [
-//         'All features from Marinate Menu',
-//         'Advanced Table Management & KOT',
-//         'Takeaway support & Order prioritization'
-//       ],
-//       services: ['dine_in', 'takeaway'],
-//       icon: TakeawayIcon,
-//     },
-//     'marinate360': {
-//       label: 'Marinate360',
-//       points: [
-//         'Full package: Dine-in, Delivery, Takeaway & Catering',
-//         'Advanced analytics, multi-location & KOT',
-//         'Custom integrations & Dedicated account manager'
-//       ],
-//       services: ['dine_in', 'delivery', 'takeaway', 'catering'],
-//       icon: AllInOneIcon,
-//     }
-//   };
-
-//   const handlePackageSelect = (pkgId: string) => {
-//     const newSelected = selectedPackage === pkgId ? null : pkgId;
-//     setSelectedPackage(newSelected);
-//     setExpandedPackage(newSelected);
-//   };
-
-//   const toggleExpandPackage = (pkgId: string, e?: React.MouseEvent) => {
-//     if (e) e.stopPropagation();
-//     setExpandedPackage(prev => (prev === pkgId ? null : pkgId));
-//   };
-
-//   const handleRegisterClick = () => {
-//     if (!isLoggedIn) {
-//       router.push('/login');
-//     } else {
-//       setSelectedPackage(null);
-//       setExpandedPackage(null);
-//       setShowServiceModal(true);
-//     }
-//   };
-
-//   // const handleServiceSelect = () => {
-//   //   if (!selectedPackage) return;
-//   //   const servicesForPackage = PACKAGE_MAP[selectedPackage]?.services ?? [];
-//   //   if (servicesForPackage.length === 0) return;
-//   //   const servicesParam = servicesForPackage.join(',');
-//   //   setShowServiceModal(false);
-//   //   router.push(`/onboarding?services=${servicesParam}`);
-//   // };
-
-//   const handleServiceSelect = () => {
-//   if (!selectedPackage) return;
-//   const servicesForPackage = PACKAGE_MAP[selectedPackage]?.services ?? [];
-//   if (servicesForPackage.length === 0) return;
-//   const servicesParam = servicesForPackage.join(',');
-//   router.push(`/onboarding?services=${encodeURIComponent(servicesParam)}&package=${encodeURIComponent(selectedPackage)}`);
-//   setShowServiceModal(false);
-// };
-
-
-
-//   // -------------------- RENDER --------------------
-//   return (
-//     <div className="min-h-screen bg-linear-to-br from-orange-50 via-white to-orange-50">
-//       <Header />
-
-//       {/* Hero Section */}
-//       <div style={{ backgroundImage: 'url("/bg2.jpg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="container mx-auto px-4 py-12 md:py-20">
-//         <div className="max-w-4xl mx-auto text-center mt-10 ">
-//           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-gray-900 mb-6 leading-tight ">
-//             Grow Your Food Business with{' '}
-//             <span className="text-orange-500 bg-linear-to-r from-orange-500 to-orange-600 bg-clip-text  font-mono ">
-//               marinate360
-//             </span>
-//           </h1>
-
-//           <p className="text-lg md:text-xl text-white mb-10 max-w-2xl mx-auto leading-relaxed">
-//             Reach millions of hungry customers, boost your revenue, and streamline operations with our all-in-one platform.
-//           </p>
-
-//           <button
-//             onClick={handleRegisterClick}
-//             className="bg-blue-500 hover:bg-blue-600 text-white font-bold mt-10 py-4 px-10 rounded-full text-lg transition duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl mb-4"
-//           >
-//             Register Your Business
-//           </button>
-
-//           <p className="text-sm text-white/80">Free setup • No hidden fees • 24/7 support</p>
-//         </div>
-//       </div>
-
-//       {/* Features Grid (unchanged) */}
-//       <div className="container mx-auto px-4 py-12 md:py-16">
-//         <div className="max-w-6xl mx-auto">
-//           <h2 className="text-3xl md:text-4xl font-bold text-center text-gray-900 mb-12">
-//             Why Partner with Us?
-//           </h2>
-
-//           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-//             <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-//               <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mb-4">
-//                 <QrCodeIcon />
-//               </div>
-//               <h3 className="text-xl font-bold mb-3 text-gray-900">QR Code Ordering</h3>
-//               <p className="text-gray-600 leading-relaxed">
-//                 Enable contactless dining with instant digital menus. Customers scan, browse, and order directly — reducing wait times and boosting satisfaction.
-//               </p>
-//             </div>
-
-//             <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-//               <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mb-4">
-//                 <KotSystemIcon />
-//               </div>
-//               <h3 className="text-xl font-bold mb-3 text-gray-900">KOT System</h3>
-//               <p className="text-gray-600 leading-relaxed">
-//                 Replace paper tickets with a real-time Kitchen Display System. Reduce errors, track prep time, and streamline workflow across busy shifts.
-//               </p>
-//             </div>
-
-//             <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-//               <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-4">
-//                 <AnalyticsIcon />
-//               </div>
-//               <h3 className="text-xl font-bold mb-3 text-gray-900">Real-Time Analytics</h3>
-//               <p className="text-gray-600 leading-relaxed">
-//                 Powered by your POS data. Gain insights into sales, popular items, and peak hours to make smarter business decisions.
-//               </p>
-//             </div>
-
-//             <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-//               <div className="w-16 h-16 bg-purple-100 rounded-2xl flex items-center justify-center mb-4">
-//                 <MultiLocationIcon />
-//               </div>
-//               <h3 className="text-xl font-bold mb-3 text-gray-900">Multi-Location Control</h3>
-//               <p className="text-gray-600 leading-relaxed">
-//                 Manage all your outlets from one unified dashboard. Customize menus, view performance, and scale effortlessly across locations.
-//               </p>
-//             </div>
-
-//             <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-//               <div className="w-16 h-16 bg-yellow-100 rounded-2xl flex items-center justify-center mb-4">
-//                 <AllInOneIcon />
-//               </div>
-//               <h3 className="text-xl font-bold mb-3 text-gray-900">All-in-One Platform</h3>
-//               <p className="text-gray-600 leading-relaxed">
-//                 From dine-in to delivery, takeaway to catering — manage every service seamlessly in a single integrated system.
-//               </p>
-//             </div>
-
-//             <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-//               <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mb-4">
-//                 <GroupOrderingIcon />
-//               </div>
-//               <h3 className="text-xl font-bold mb-3 text-gray-900">Group Ordering</h3>
-//               <p className="text-gray-600 leading-relaxed">
-//                 Let groups of diners add items to one shared order from their own phones using a simple code. Perfect for parties, families, and corporate gatherings.
-//               </p>
-//             </div>
-//           </div>
-//         </div>
-//       </div>
-
-//       {/* SERVICE SELECTION MODAL - PACKAGES AS ACCORDION (no service toggles) */}
-//       {showServiceModal && (
-//         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 ">
-//           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 md:p-8 max-h-[90vh] overflow-y-auto shadow-2xl hide-scrollbar">
-//             <div className="flex justify-between items-center mb-6">
-//               <h3 className="text-2xl md:text-3xl font-bold text-gray-900">
-//                 Choose Your Package
-//               </h3>
-//               <button
-//               aria-label='services'
-//                 onClick={() => setShowServiceModal(false)}
-//                 className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg"
-//               >
-//                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-//                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-//                 </svg>
-//               </button>
-//             </div>
-
-//             <p className="text-gray-600 mb-6">
-//               Pick a package. Click anywhere on a package box to select it. Expand to view details.
-//             </p>
-
-//             <div className="space-y-4 mb-6">
-//               {Object.entries(PACKAGE_MAP).map(([pkgId, pkg]) => {
-//                 const isSelected = selectedPackage === pkgId;
-//                 const isExpanded = expandedPackage === pkgId;
-
-//                 return (
-//                   <div
-//                     key={pkgId}
-//                     className={`border rounded-2xl overflow-hidden ${isSelected ? 'border-blue-500 shadow-lg' : 'border-gray-200'}`}
-//                     onClick={() => handlePackageSelect(pkgId)}
-//                   >
-//                     <div className="w-full px-5 py-4 flex items-center justify-between bg-white hover:bg-gray-50 transition">
-//                       <div className="flex items-center gap-4">
-//                         <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-//                           <span className="text-blue-600"><pkg.icon /></span>
-//                         </div>
-
-//                         <div className="text-left">
-//                           <div className={`font-semibold ${isSelected ? 'text-blue-600' : 'text-gray-900'}`}>{pkg.label}</div>
-//                           <div className="text-sm text-gray-500">{pkg.points[0]}</div>
-//                         </div>
-//                       </div>
-
-//                       <div className="flex items-center gap-4">
-//                         <div className="text-sm text-gray-500">{isSelected ? 'Selected' : ''}</div>
-                         
-//                         <button
-//                           aria-label='expand'
-//                           onClick={(e) => toggleExpandPackage(pkgId, e)}
-//                           className="p-2 rounded-md hover:bg-gray-100"
-//                           aria-expanded={isExpanded}
-//                         >
-//                           <svg className={`w-5 h-5 text-blue-500 transform transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-//                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-//                           </svg>
-//                         </button>
-//                       </div>
-//                     </div>
-
-//                     <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[800px]' : 'max-h-0'}`}>
-//                       <div className="px-5 py-4 bg-gray-50">
-//                         <div className="mb-3">
-//                           <div className="font-medium text-gray-800 mb-2">What&apos;s included</div>
-//                           <ul className="list-disc pl-5 text-gray-600">
-//                             {pkg.points.map((p, i) => (
-//                               <li key={i} className="mb-1">{p}</li>
-//                             ))}
-//                           </ul>
-//                         </div>
-//                       </div>
-//                     </div>
-//                   </div>
-//                 );
-//               })}
-//             </div>
-
-//             <div className="flex justify-between items-center">
-//               <div className="text-sm text-gray-500">
-//                 {selectedPackage ? `Package: ${PACKAGE_MAP[selectedPackage].label}` : 'No package selected'}
-//               </div>
-
-//               <div className="flex items-center gap-3">
-//                 <button
-//                   onClick={() => { setSelectedPackage(null); setExpandedPackage(null); }}
-//                   className="px-4 py-2 rounded-md text-sm border border-gray-300 hover:bg-gray-50"
-//                 >
-//                   Reset
-//                 </button>
-
-//                 <button
-//                   onClick={handleServiceSelect}
-//                   disabled={!selectedPackage}
-//                   className={`px-6 py-3 rounded-lg font-semibold ${selectedPackage ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}
-//                 >
-//                   Continue to Registration
-//                 </button>
-//               </div>
-//             </div>
-//           </div>
-//         </div>
-//       )}
-
-//       <Footer />
-//     </div>
-//   );
-// }
-
-
-'use client';
-
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Header } from '../layout/Header';
-import { Footer } from '../layout/Footer';
-import { TruckIcon } from 'lucide-react';
-
-
-  function QrCodeIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M3 3h4v4H3V3zm6 6h4v4H9V9zm-6 6h4v4H3v-4zm12-12h4v4h-4V3zm-6 6h4v4h-4v-4zm6 0h4v4h-4v-4zm-6 6h4v4h-4v-4zm6 0h4v4h-4v-4zm-6 6h4v4H9v-4zm6 0h4v4h-4v-4zm6 0h2v2h-2v-2zm0-6h2v2h-2v-2zm0-6h2v2h-2v-2z" />
-      </svg>
-    );
-  }
-
-  function KotSystemIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
-      </svg>
-    );
-  }
-
-  function AnalyticsIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-5h2v5zm4 0h-2v-3h2v3zm0-5h-2v-2h2v2zm4 5h-2V7h2v10z" />
-      </svg>
-    );
-  }
-
-  function MultiLocationIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z" />
-      </svg>
-    );
-  }
-
-  function AllInOneIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8 14H7v-2h4v2zm0-4H7v-2h4v2zm0-4H7V7h4v2zm6 8h-4v-2h4v2zm0-4h-4v-2h4v2zm0-4h-4V7h4v2z" />
-      </svg>
-    );
-  }
-
-  function GroupOrderingIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-      </svg>
-    );
-  }
-
-  function DineInIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
-      </svg>
-    );
-  }
-
-
-  function TakeawayIcon() {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M18 6h-2c0-2.21-1.79-4-4-4S8 3.79 8 6H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6-2c1.1 0 2 .89 2 2h-4c0-1.11.9-2 2-2zm6 14H6V8h2v2c0 .55.45 1 1 1s1-.45 1-1V8h4v2c0 .55.45 1 1 1s1-.45 1-1V8h2v10z" />
-      </svg>
-    );
-  }
-
-
-
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { BarChart3, Check, ChefHat, ChevronDown, ClipboardCheck, QrCode, Settings2, Star, Truck, X } from "lucide-react";
+import { Header } from "@/src/layout/Header";
+import { Footer } from "@/src/layout/Footer";
+import { supabase } from "@/src/lib/supabase/client";
+
+const PACKAGES = {
+  "marinate-menu": {
+    label: "Marinate Menu",
+    services: ["dine_in", "takeaway"],
+    summary: "A clean QR menu and takeaway-ready setup for restaurants that want to go digital fast.",
+    points: ["Unlimited QR code menu", "Easy menu management", "Customer self-service menu"],
+  },
+  "marinate-dinein": {
+    label: "Marinate Dine",
+    services: ["dine_in", "takeaway"],
+    summary: "Table operations, KOT flow, waiter workflow, and dine-in focused ordering.",
+    points: ["Table management", "Kitchen order tickets", "Shared order access"],
+  },
+  marinate360: {
+    label: "Marinate 360",
+    services: ["dine_in", "delivery", "takeaway", "catering"],
+    summary: "The complete operating package for dine-in, delivery, takeaway, and catering.",
+    points: ["Delivery and takeaway management", "Reservations and catering", "Analytics and reports"],
+  },
+} as const;
 
 export default function HomePage() {
   const router = useRouter();
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    try {
-      const userStr = sessionStorage.getItem('user');
-      return !!userStr;
-    } catch {
-      return false;
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showPackages, setShowPackages] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<keyof typeof PACKAGES>("marinate-menu");
+
+  useEffect(() => {
+    async function loadSession() {
+      const { data } = await supabase.auth.getSession();
+      const storedUser = localStorage.getItem("user") || sessionStorage.getItem("user");
+      const parsedUser = storedUser ? JSON.parse(storedUser) : null;
+      setIsLoggedIn(Boolean(data.session || parsedUser));
     }
-  });
-  const [showServiceModal, setShowServiceModal] = useState(false);
 
-  // package selection & accordion
-  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
-  const [expandedPackage, setExpandedPackage] = useState<string | null>(null);
+    loadSession();
+  }, []);
 
-  const [userRole, setUserRole] = useState<string | null>(() => {
-    try {
-      const userStr = sessionStorage.getItem('user');
-      if (!userStr) return null;
-      const user = JSON.parse(userStr);
-      return user.role?.name || user.role?.type || null;
-    } catch (e) {
-      console.error('Failed to parse user from sessionStorage', e);
-      return null;
-    }
-  });
+  const selected = useMemo(() => PACKAGES[selectedPackage], [selectedPackage]);
 
-  // previous attempt using an effect is removed because state is initialized lazily from sessionStorage
-
-  const PACKAGE_MAP: Record<string, { label: string; points: string[]; services: string[]; icon: React.ComponentType; price?: string }> = {
-    'marinate-menu': {
-      label: 'Marinate — Menu',
-      points: [
-        'Unlimited QR Code Menu Generation',
-        'Easy Menu Management with Bulk Upload',
-        'Mobile-Responsive Menus & Basic Reports'
-      ],
-      services: ['dine_in','takeaway'],
-      icon: DineInIcon,
-    },
-    'marinate-dinein': {
-      label: 'Marinate — Dine-in',
-      points: [
-        'All features from Marinate Menu',
-        'Advanced Table Management & KOT',
-        'Takeaway support & Order prioritization'
-      ],
-      services: ['dine_in', 'takeaway'],
-      icon: TakeawayIcon,
-    },
-    'marinate360': {
-      label: 'Marinate360',
-      points: [
-        'Full package: Dine-in, Delivery, Takeaway & Catering',
-        'Advanced analytics, multi-location & KOT',
-        'Custom integrations & Dedicated account manager'
-      ],
-      services: ['dine_in', 'delivery', 'takeaway', 'catering'],
-      icon: AllInOneIcon,
-    },
-    'food-truck': {
-      label: 'Food-truck',
-      points: [
-        'Items ordering via QR codes',
-        'Eat here & Takeaway support',
-      ],
-      services: ['dine_in', 'takeaway'],
-      icon: TruckIcon,
-    }
-  };
-
-  const handlePackageSelect = (pkgId: string) => {
-    const newSelected = selectedPackage === pkgId ? null : pkgId;
-    setSelectedPackage(newSelected);
-    setExpandedPackage(newSelected);
-  };
-
-  const toggleExpandPackage = (pkgId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setExpandedPackage(prev => (prev === pkgId ? null : pkgId));
-  };
-
-  const handleRegisterClick = () => {
+  function startRegistration() {
     if (!isLoggedIn) {
-      router.push('/login');
-    } else {
-      setSelectedPackage(null);
-      setExpandedPackage(null);
-      setShowServiceModal(true);
+      router.push("/login");
+      return;
     }
-  };
+    setShowPackages(true);
+  }
 
-  // const handleServiceSelect = () => {
-  //   if (!selectedPackage) return;
-  //   const servicesForPackage = PACKAGE_MAP[selectedPackage]?.services ?? [];
-  //   if (servicesForPackage.length === 0) return;
-  //   const servicesParam = servicesForPackage.join(',');
-  //   setShowServiceModal(false);
-  //   router.push(`/onboarding?services=${servicesParam}`);
-  // };
+  function continueToOnboarding() {
+    router.push(`/onboarding?services=${encodeURIComponent(selected.services.join(","))}&package=${encodeURIComponent(selectedPackage)}`);
+  }
 
-  const handleServiceSelect = () => {
-  if (!selectedPackage) return;
-  const servicesForPackage = PACKAGE_MAP[selectedPackage]?.services ?? [];
-  if (servicesForPackage.length === 0) return;
-  const servicesParam = servicesForPackage.join(',');
-  router.push(`/onboarding?services=${encodeURIComponent(servicesParam)}&package=${encodeURIComponent(selectedPackage)}`);
-  setShowServiceModal(false);
-};
-
-
-
-  // -------------------- RENDER --------------------
   return (
-    <div className="min-h-screen bg-linear-to-br from-orange-50 via-white to-orange-50">
+    <main className="min-h-screen bg-[#fff8f1] text-zinc-950">
       <Header />
 
-      {/* Hero Section */}
-      <div style={{ backgroundImage: 'url("/bg2.jpg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="container mx-auto px-4 py-35 md:py-20">
-        <div className="max-w-4xl mx-auto text-center mt-10 ">
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-gray-900 mb-6 leading-tight ">
-            Grow Your Food Business with{' '}
-            <span className="text-orange-500 bg-linear-to-r from-orange-500 to-orange-600 bg-clip-text  font-mono ">
-              marinate360
-            </span>
-          </h1>
-
-          <p className="text-lg md:text-xl text-white mb-10 max-w-2xl mx-auto leading-relaxed">
-            Reach millions of hungry customers, boost your revenue, and streamline operations with our all-in-one platform.
-          </p>
-
-          {
-            userRole !== 'admin' && (
+      <section
+        className="relative min-h-[86vh] overflow-hidden bg-cover bg-center px-4 pt-28"
+        style={{
+          backgroundImage:
+            'linear-gradient(90deg, rgba(17, 17, 17, 0.68) 0%, rgba(17, 17, 17, 0.38) 42%, rgba(255, 248, 241, 0.12) 100%), url("/bg2.jpg")',
+        }}
+      >
+        <div className="mx-auto flex min-h-[calc(86vh-7rem)] max-w-7xl flex-col items-center justify-center pb-20 pt-16 text-center">
+          <div className="max-w-4xl">
+            <p className="mb-5 text-sm font-semibold uppercase tracking-[0.2em] text-orange-300">Restaurant onboarding</p>
+            <h1 className="mx-auto max-w-4xl text-4xl font-semibold leading-[1.08] text-white sm:text-5xl lg:text-6xl">
+              Grow your food business with <span className="text-orange-300">marinate360</span>
+            </h1>
+            <p className="mx-auto mt-6 max-w-2xl text-base leading-8 text-white/90 sm:text-lg">
+              Start your restaurant with QR ordering, POS-ready workflows, table service, takeaway, delivery, and insights built for modern hospitality.
+            </p>
+            <div className="mt-8 flex justify-center">
               <button
-                onClick={handleRegisterClick}
-                className="bg-blue-500 hover:bg-blue-600 text-white font-bold mt-10 py-4 px-10 rounded-full text-lg transition duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl mb-4"
+                onClick={startRegistration}
+                className="rounded-md bg-orange-500 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-orange-950/20 transition hover:bg-orange-600"
               >
-                Register Your Business
+                Register your restaurant
               </button>
-            )
-          }
-
-          <p className="text-sm text-white/80">Free setup • No hidden fees • 24/7 support</p>
-        </div>
-      </div>
-
-      {/* Features Grid (unchanged) */}
-      <div className="container mx-auto px-4 py-12 md:py-16">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl md:text-4xl font-bold text-center text-gray-900 mb-12">
-            Why Partner with Us?
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-            <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-              <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mb-4">
-                <QrCodeIcon />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-gray-900">QR Code Ordering</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Enable contactless dining with instant digital menus. Customers scan, browse, and order directly — reducing wait times and boosting satisfaction.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-              <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mb-4">
-                <KotSystemIcon />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-gray-900">KOT System</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Replace paper tickets with a real-time Kitchen Display System. Reduce errors, track prep time, and streamline workflow across busy shifts.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-              <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-4">
-                <AnalyticsIcon />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-gray-900">Real-Time Analytics</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Powered by your POS data. Gain insights into sales, popular items, and peak hours to make smarter business decisions.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-              <div className="w-16 h-16 bg-purple-100 rounded-2xl flex items-center justify-center mb-4">
-                <MultiLocationIcon />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-gray-900">Multi-Location Control</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Manage all your outlets from one unified dashboard. Customize menus, view performance, and scale effortlessly across locations.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-              <div className="w-16 h-16 bg-yellow-100 rounded-2xl flex items-center justify-center mb-4">
-                <AllInOneIcon />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-gray-900">All-in-One Platform</h3>
-              <p className="text-gray-600 leading-relaxed">
-                From dine-in to delivery, takeaway to catering — manage every service seamlessly in a single integrated system.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 border border-gray-100">
-              <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mb-4">
-                <GroupOrderingIcon />
-              </div>
-              <h3 className="text-xl font-bold mb-3 text-gray-900">Group Ordering</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Let groups of diners add items to one shared order from their own phones using a simple code. Perfect for parties, families, and corporate gatherings.
-              </p>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* SERVICE SELECTION MODAL - PACKAGES AS ACCORDION (no service toggles) */}
-      {showServiceModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 ">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 md:p-8 max-h-[90vh] overflow-y-auto shadow-2xl hide-scrollbar">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl md:text-3xl font-bold text-gray-900">
-                Choose Your Package
-              </h3>
-              <button
-              aria-label='services'
-                onClick={() => setShowServiceModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+
+      <section className="bg-white px-4 py-16">
+        <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-600">About Marinate</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">A restaurant operating layer for menus, orders, and daily service.</h2>
+            <p className="mt-5 leading-8 text-zinc-600">
+              Marinate360 brings digital menus, QR ordering, POS-friendly order flow, table operations, takeaway, delivery, kitchen display, and analytics into one modern restaurant platform.
+            </p>
+            <p className="mt-4 leading-8 text-zinc-600">
+              Whether you are launching a new outlet or upgrading daily operations, the product is built to reduce manual work, improve guest experience, and give your team clearer control across every order channel.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Feature icon={<QrCode />} title="Digital menu and QR" body="Create a cleaner customer ordering entry point without depending on printed menus." />
+            <Feature icon={<ChefHat />} title="Kitchen display system" body="Keep kitchen tickets organized with real-time order flow and preparation visibility." />
+            <Feature icon={<Truck />} title="Takeaway and delivery" body="Manage pickup and delivery orders with clearer status updates for staff and customers." />
+            <Feature icon={<Settings2 />} title="Restaurant control center" body="Manage menu, orders, service modes, tables, and business insights from one connected workspace." />
+          </div>
+        </div>
+      </section>
+
+      <section className="border-y border-orange-100 bg-[#fff8f1] px-4 py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-600">Why restaurants use it</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Everything you need to run your restaurant with confidence.</h2>
+          </div>
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            <Reason icon={<ClipboardCheck />} title="Faster daily operations" body="Orders, tables, kitchen tickets, and service requests stay organized so teams spend less time switching tools." />
+            <Reason icon={<BarChart3 />} title="Smarter decisions" body="Track sales trends, peak hours, menu performance, and operational signals as your restaurant grows." />
+            <Reason icon={<Settings2 />} title="Flexible for every format" body="Use the platform for dine-in, QR menu, takeaway, delivery, reservations, catering, and multi-channel service." />
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white px-4 py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-600">Client stories</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Built with real restaurant workflows in mind.</h2>
+          </div>
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            <Testimonial name="Dasara Indian Kitchen" role="Cloud kitchen operator" quote="Marinate360 gives our team a cleaner way to handle menu updates, customer orders, and day-to-day order visibility." />
+            <Testimonial name="Flash Back Arabian Mandi" role="Dine-in restaurant" quote="The dine-in tools make table service easier to manage, especially when the kitchen and floor staff need to stay aligned." />
+            <Testimonial name="Mithai Shop" role="Quick-service brand" quote="QR ordering gives customers a faster way to browse, order, and move ahead without waiting for a printed menu." />
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-orange-100 bg-[#fff8f1] px-4 py-16">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="rounded-2xl bg-zinc-950 p-6 text-white shadow-xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-300">FAQ</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight">Frequently asked questions</h2>
+            <p className="mt-4 leading-7 text-white/70">
+              Clear answers for restaurants exploring QR ordering, POS workflows, and Marinate360 plans.
+            </p>
+            <button onClick={startRegistration} className="mt-6 rounded-md bg-orange-500 px-5 py-3 text-sm font-semibold text-white hover:bg-orange-600">
+              Register your restaurant
+            </button>
+          </div>
+          <div className="space-y-4">
+            <FAQ question="What can I run with Marinate360?" answer="You can manage QR code menus, table ordering, kitchen tickets, takeaway, delivery, reservations, customer service requests, and business insights based on the plan you choose." />
+            <FAQ question="Which plan should I choose?" answer="Marinate Menu is ideal for QR menu setup, Marinate Dine is built for dine-in automation, and Marinate 360 is for restaurants that need the complete operating suite." />
+            <FAQ question="Do I need a technical team to get started?" answer="No. The setup flow is built for restaurant teams. You provide your business details and preferred plan, and the product setup can be configured for your restaurant." />
+            <FAQ question="Can I upgrade later?" answer="Yes. Restaurants can start with a focused plan and move to a broader plan when they need dine-in automation, delivery, reservations, analytics, or more advanced operations." />
+            <FAQ question="Does it work for dine-in, takeaway, and delivery?" answer="Yes. Marinate360 is designed for multiple restaurant formats, including dine-in restaurants, quick-service outlets, cloud kitchens, takeaway counters, and delivery operations." />
+          </div>
+        </div>
+      </section>
+
+      {showPackages && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-orange-100 p-5">
+              <div>
+                <h2 className="text-2xl font-semibold">Select package</h2>
+                <p className="text-sm text-zinc-500">Choose the plan that matches your restaurant operations.</p>
+              </div>
+              <button onClick={() => setShowPackages(false)} className="rounded-md p-2 hover:bg-zinc-100" aria-label="Close">
+                <X size={20} />
               </button>
             </div>
-
-            <p className="text-gray-600 mb-6">
-              Pick a package. Click anywhere on a package box to select it. Expand to view details.
-            </p>
-
-            <div className="space-y-4 mb-6">
-              {Object.entries(PACKAGE_MAP).map(([pkgId, pkg]) => {
-                const isSelected = selectedPackage === pkgId;
-                const isExpanded = expandedPackage === pkgId;
-
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              {Object.entries(PACKAGES).map(([id, pkg]) => {
+                const active = selectedPackage === id;
                 return (
-                  <div
-                    key={pkgId}
-                    className={`border rounded-2xl overflow-hidden ${isSelected ? 'border-green-500 shadow-lg ' : 'border-gray-200'}`}
-                    onClick={() => handlePackageSelect(pkgId)}
+                  <button
+                    key={id}
+                    onClick={() => setSelectedPackage(id as keyof typeof PACKAGES)}
+                    className={`rounded-lg border p-4 text-left ${active ? "border-orange-500 bg-orange-50" : "border-zinc-200 hover:bg-zinc-50"}`}
                   >
-                  <div className={`w-full px-5 py-4 flex items-center justify-between  hover:bg-gray-50 transition ${isSelected ? 'bg-green-50 hover:bg-green-50' : 'bg-white'} `}>
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center ${isSelected ? 'bg-green-50' : 'bg-blue-50'} `}>
-                          <span className={`text-blue-600 ${isSelected ? 'text-green-500 ' : 'border-gray-200'}`}><pkg.icon /></span>
-                        </div>
-
-                        <div className="text-left">
-                          <div className={`font-semibold ${isSelected ? 'text-green-600' : 'text-gray-900'}`}>{pkg.label}</div>
-                          <div className="text-sm text-gray-500">{pkg.points[0]}</div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <div className={`text-sm text-gray-500 ${isSelected ? 'text-green-600' : ''}`}>{isSelected ? 'Selected' : ''}</div>
-                         
-                        <button
-                          aria-label='expand'
-                          onClick={(e) => toggleExpandPackage(pkgId, e)}
-                          className={"p-2 rounded-md hover:bg-gray-100"}
-                          aria-expanded={isExpanded}
-                        >
-                          <svg className={`w-5 h-5 text-blue-500 transform transition-transform ${isExpanded ? 'rotate-180 ' : ''} ${isSelected ? 'text-green-500' : ''} `} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-semibold">{pkg.label}</h3>
+                      {active && <Check size={18} className="text-orange-600" />}
                     </div>
-
-                    <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[800px]' : 'max-h-0'}`}>
-                      <div className="px-5 py-4 bg-gray-50">
-                        <div className="mb-3">
-                          <div className="font-medium text-gray-800 mb-2">What&apos;s included</div>
-                          <ul className="list-disc pl-5 text-gray-600">
-                            {pkg.points.map((p, i) => (
-                              <li key={i} className="mb-1">{p}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    <ul className="mt-3 space-y-2 text-sm text-zinc-600">
+                      {pkg.points.map((point) => (
+                        <li key={point} className="flex gap-2">
+                          <Check size={16} className="mt-0.5 text-orange-600" />
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </button>
                 );
               })}
             </div>
-
-            <div className="flex justify-between items-center">
-              <div className="text-sm text-gray-500">
-                {selectedPackage ? `Package: ${PACKAGE_MAP[selectedPackage].label}` : 'No package selected'}
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => { setSelectedPackage(null); setExpandedPackage(null); }}
-                  className="px-4 py-2 rounded-md text-sm border border-gray-300 hover:bg-gray-50"
-                >
-                  Reset
-                </button>
-
-                <button
-                  onClick={handleServiceSelect}
-                  disabled={!selectedPackage}
-                  className={`px-6 py-3 rounded-lg font-semibold ${selectedPackage ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}
-                >
-                  Continue to Registration
-                </button>
-              </div>
+            <div className="flex flex-col gap-2 border-t border-orange-100 bg-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-zinc-600">Selected: {selected.label}</p>
+              <button onClick={continueToOnboarding} className="rounded-md bg-orange-500 px-5 py-3 text-sm font-semibold text-white hover:bg-orange-600">
+                Continue to registration
+              </button>
             </div>
           </div>
         </div>
       )}
 
       <Footer />
-    </div>
+    </main>
+  );
+}
+
+function Feature({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <article className="rounded-lg border border-orange-100 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-orange-100 text-orange-600">{icon}</div>
+      <h3 className="font-semibold">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-zinc-600">{body}</p>
+    </article>
+  );
+}
+
+function Reason({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <article className="rounded-lg border border-orange-100 bg-white p-6 shadow-sm">
+      <div className="flex h-11 w-11 items-center justify-center rounded-md bg-orange-100 text-orange-600">{icon}</div>
+      <h3 className="mt-5 font-semibold">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-zinc-600">{body}</p>
+    </article>
+  );
+}
+
+function Testimonial({ name, role, quote }: { name: string; role: string; quote: string }) {
+  return (
+    <article className="rounded-lg border border-orange-100 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex gap-1 text-orange-500">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Star key={index} size={16} fill="currentColor" />
+        ))}
+      </div>
+      <p className="leading-7 text-zinc-700">&ldquo;{quote}&rdquo;</p>
+      <div className="mt-5 border-t border-orange-100 pt-4">
+        <h3 className="font-semibold">{name}</h3>
+        <p className="mt-1 text-sm text-zinc-500">{role}</p>
+      </div>
+    </article>
+  );
+}
+
+function FAQ({ question, answer }: { question: string; answer: string }) {
+  return (
+    <details className="group rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold sm:text-lg">
+        {question}
+        <ChevronDown size={20} className="shrink-0 text-zinc-400 transition group-open:rotate-180" />
+      </summary>
+      <p className="mt-4 leading-7 text-zinc-600">{answer}</p>
+    </details>
   );
 }
