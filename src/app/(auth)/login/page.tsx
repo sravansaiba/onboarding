@@ -56,11 +56,9 @@ export default function LoginPage() {
         <section className="hidden lg:block">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-600">marinate360 onboarding</p>
           <h1 className="mt-4 max-w-2xl text-5xl font-extrabold leading-tight">
-            Bring every restaurant registration into one Supabase-powered flow.
+            Bring every restaurant registration into one clean flow.
           </h1>
-          <p className="mt-5 max-w-xl text-lg leading-8 text-zinc-600">
-            Review applications, approve restaurants, track documents, and prepare future subscriptions from one clean workspace.
-          </p>
+          
         </section>
 
         <section className="rounded-2xl border border-orange-100 bg-white p-6 shadow-xl shadow-orange-100/70 sm:p-8">
@@ -69,7 +67,7 @@ export default function LoginPage() {
               <LogIn size={24} />
             </div>
             <h2 className="text-2xl font-bold">Sign in</h2>
-            <p className="mt-1 text-sm text-zinc-500">Use your Supabase account to continue.</p>
+            {/* <p className="mt-1 text-sm text-zinc-500">Use your account to continue.</p> */}
           </div>
 
           {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
