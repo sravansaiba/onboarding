@@ -47,7 +47,7 @@ export default function LoginPage() {
     storage.setItem("user", JSON.stringify(profile));
     storage.setItem("isLoggedIn", "true");
 
-    router.push(["super_admin", "admin"].includes(profile.role) ? "/dashboard" : "/");
+    router.push("/dashboard");
   }
 
   return (

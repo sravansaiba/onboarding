@@ -1,6 +1,6 @@
 "use server";
 
-import { getSupabaseAdmin, getUserFromAccessToken, type ActionResult } from "./supabase/server";
+import { getSupabaseAdmin, getUserFromAccessToken, isSuperAdminRole, type ActionResult } from "./supabase/server";
 import { loggedAction } from "./app-logs";
 
 export type AppProfile = {
@@ -60,7 +60,7 @@ export async function ensureCustomerProfile(
             id: user.id,
             email: values.email,
             username: values.username,
-            role: user.role === "super_admin" ? user.role : "customer",
+            role: isSuperAdminRole(user.role) ? user.role : "customer",
             updated_at: new Date().toISOString(),
           },
           { onConflict: "id" }

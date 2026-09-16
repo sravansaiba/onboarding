@@ -232,10 +232,10 @@ function CustomerOverview({ record }: { record: OnboardingApplication }) {
         <InfoPanel
           title="Address"
           items={[
-            ["Building", String(record.address?.buildingno ?? "")],
-            ["Area", String(record.address?.area ?? "")],
+            ["Building / Line 1", String(record.address?.address_line_1 || record.address?.buildingno || "")],
+            ["Area / Line 2", String(record.address?.address_line_2 || record.address?.area || "")],
             ["City", String(record.address?.city ?? "")],
-            ["Pincode", String(record.address?.pincode ?? "")],
+            ["Pincode", String(record.address?.pincode || record.address?.postcode || "")],
             ["Landmark", String(record.address?.landmark ?? "")],
           ]}
         />
@@ -340,11 +340,11 @@ function EditModal({
   const [ownerName, setOwnerName] = useState(record.owner_name);
   const [phone, setPhone] = useState(record.phone);
   const [primaryContact, setPrimaryContact] = useState(record.restaurant_primary_contact);
-  const [building, setBuilding] = useState(String(record.address?.buildingno ?? ""));
+  const [building, setBuilding] = useState(String(record.address?.address_line_1 || record.address?.buildingno || ""));
   const [floor, setFloor] = useState(String(record.address?.floor ?? ""));
-  const [area, setArea] = useState(String(record.address?.area ?? ""));
+  const [area, setArea] = useState(String(record.address?.address_line_2 || record.address?.area || ""));
   const [city, setCity] = useState(String(record.address?.city ?? ""));
-  const [pincode, setPincode] = useState(String(record.address?.pincode ?? ""));
+  const [pincode, setPincode] = useState(String(record.address?.pincode || record.address?.postcode || ""));
   const [landmark, setLandmark] = useState(String(record.address?.landmark ?? ""));
   const [registeredAddress, setRegisteredAddress] = useState(String(record.address?.registered_business_address ?? ""));
   const [cuisines, setCuisines] = useState(record.cuisines.join(", "));
@@ -367,8 +367,10 @@ function EditModal({
       address: {
         ...record.address,
         buildingno: building,
+        address_line_1: building,
         floor,
         area,
+        address_line_2: area,
         city,
         pincode,
         landmark,

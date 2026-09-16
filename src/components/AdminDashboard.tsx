@@ -20,6 +20,7 @@ import {
   Search,
   Store,
   Trash2,
+  Users,
   X,
   XCircle,
 } from "lucide-react";
@@ -44,10 +45,12 @@ import {
   upsertRestaurantSetting,
   type RestaurantSetting,
 } from "@/src/app/actions/restaurant-settings";
-import { listAppLogs, type AppLogRecord, type LogType } from "@/src/app/actions/app-logs";
+import { listAppLogs, purgeOldAppLogs, type AppLogRecord, type LogType } from "@/src/app/actions/app-logs";
 import type { AppProfile } from "@/src/app/actions/profiles";
 import { supabase } from "@/src/lib/supabase/client";
 import { RESTAURANT_SETTING_DEFINITIONS, type RestaurantSettingDefinition } from "@/src/lib/constants/restaurant-settings";
+import { formatAddress } from "@/src/lib/utils/address";
+import UsersManagementView from "./admin/UsersManagementView";
 
 type Props = {
   accessToken: string;
@@ -55,7 +58,7 @@ type Props = {
   onLogout: () => void;
 };
 
-type AdminView = "overview" | "applications" | "restaurants" | "logs";
+type AdminView = "overview" | "applications" | "restaurants" | "users" | "logs";
 type RestaurantPanelTab = "overview" | "settings";
 
 const STATUS_TABS: Array<ApplicationStatus | "all"> = ["all", "pending", "accepted", "rejected"];
@@ -80,6 +83,8 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
   const [restaurantSearch, setRestaurantSearch] = useState("");
   const [logSearch, setLogSearch] = useState("");
   const [logLevel, setLogLevel] = useState<"all" | "info" | "warning" | "error">("all");
+  const [logTimeRange, setLogTimeRange] = useState<"1h" | "24h" | "7d" | "all">("24h");
+  const [logStatusCategory, setLogStatusCategory] = useState<"all" | "2xx" | "4xx" | "5xx">("all");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -128,8 +133,10 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
         restaurantId,
         level: logLevel,
         logType: logType,
+        timeRange: logTimeRange,
+        statusCategory: logStatusCategory,
         query: logSearch,
-        limit: 250,
+        limit: 300,
       });
 
       if (result.ok) {
@@ -140,7 +147,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
         toast.error(result.error);
       }
     },
-    [accessToken, logLevel, logType, logSearch]
+    [accessToken, logLevel, logType, logTimeRange, logStatusCategory, logSearch]
   );
 
   useEffect(() => {
@@ -341,6 +348,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
               <SidebarButton icon={<LayoutDashboard size={18} />} label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
               <SidebarButton icon={<ClipboardList size={18} />} label="Applications" active={activeView === "applications"} onClick={() => setActiveView("applications")} badge={stats.pending} />
               <SidebarButton icon={<Store size={18} />} label="Restaurants" active={activeView === "restaurants"} onClick={() => setActiveView("restaurants")} />
+              <SidebarButton icon={<Users size={18} />} label="Manage users" active={activeView === "users"} onClick={() => setActiveView("users")} />
               <SidebarButton icon={<FileClock size={18} />} label="Logs" active={activeView === "logs"} onClick={() => setActiveView("logs")} />
             </nav>
             <div className="border-t border-zinc-100 p-4">
@@ -379,6 +387,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                 <MobileTab label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
                 <MobileTab label="Applications" active={activeView === "applications"} onClick={() => setActiveView("applications")} />
                 <MobileTab label="Restaurants" active={activeView === "restaurants"} onClick={() => setActiveView("restaurants")} />
+                <MobileTab label="Manage users" active={activeView === "users"} onClick={() => setActiveView("users")} />
                 <MobileTab label="Logs" active={activeView === "logs"} onClick={() => setActiveView("logs")} />
               </div>
             </div>
@@ -467,9 +476,14 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
               )
             )}
 
+            {activeView === "users" && (
+              <UsersManagementView accessToken={accessToken} restaurants={restaurants} />
+            )}
+
             {activeView === "logs" && (
               selectedLogRestaurant ? (
                 <RestaurantLogsWorkspace
+                  accessToken={accessToken}
                   restaurant={selectedLogRestaurant}
                   logs={appLogs}
                   totalCount={logTotalCount}
@@ -479,6 +493,10 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                   setLogLevel={setLogLevel}
                   logType={logType}
                   setLogType={setLogType}
+                  logTimeRange={logTimeRange}
+                  setLogTimeRange={setLogTimeRange}
+                  logStatusCategory={logStatusCategory}
+                  setLogStatusCategory={setLogStatusCategory}
                   logPage={logPage}
                   setLogPage={setLogPage}
                   onBack={() => setSelectedLogRestaurantId("")}
@@ -530,6 +548,7 @@ function viewTitle(view: AdminView) {
     overview: "Analytics overview",
     applications: "Application reviews",
     restaurants: "Restaurant workspace",
+    users: "User management",
     logs: "Restaurant logs",
   }[view];
 }
@@ -900,7 +919,137 @@ type RestaurantEditorValues = {
 
 const LOGS_PER_PAGE = 20;
 
+function LogActivityHistogram({
+  logs,
+  timeRange,
+}: {
+  logs: AppLogRecord[];
+  timeRange: "1h" | "24h" | "7d" | "all";
+}) {
+  const buckets = useMemo(() => {
+    const numBuckets = 20;
+    const now = Date.now();
+    const rangeMs = {
+      "1h": 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+      all: 30 * 24 * 60 * 60 * 1000,
+    }[timeRange];
+
+    const bucketDuration = rangeMs / numBuckets;
+    const startTime = now - rangeMs;
+
+    const result = Array.from({ length: numBuckets }, (_, i) => {
+      const bStart = startTime + i * bucketDuration;
+      const bEnd = bStart + bucketDuration;
+      const label =
+        timeRange === "1h"
+          ? new Date(bStart).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : timeRange === "24h"
+          ? new Date(bStart).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : new Date(bStart).toLocaleDateString([], { month: "short", day: "numeric" });
+      return {
+        start: bStart,
+        end: bEnd,
+        label,
+        total: 0,
+        success: 0,
+        clientError: 0,
+        serverError: 0,
+      };
+    });
+
+    logs.forEach((log) => {
+      const logTime = new Date(log.created_at).getTime();
+      if (logTime >= startTime && logTime <= now) {
+        const bucketIndex = Math.min(Math.floor((logTime - startTime) / bucketDuration), numBuckets - 1);
+        if (bucketIndex >= 0) {
+          result[bucketIndex].total += 1;
+          const code = log.status_code ?? (log.status === "failed" ? 500 : 200);
+          if (code >= 500) result[bucketIndex].serverError += 1;
+          else if (code >= 400) result[bucketIndex].clientError += 1;
+          else result[bucketIndex].success += 1;
+        }
+      }
+    });
+
+    return result;
+  }, [logs, timeRange]);
+
+  const maxCount = Math.max(...buckets.map((b) => b.total), 1);
+  const totalInView = logs.length;
+  const errorsInView = logs.filter((l) => (l.status_code && l.status_code >= 400) || l.level === "error").length;
+  const errorRate = totalInView > 0 ? ((errorsInView / totalInView) * 100).toFixed(1) : "0.0";
+
+  return (
+    <div className="rounded-xl border border-orange-200/80 bg-gradient-to-b from-orange-50/50 via-white to-white p-5 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-orange-500 text-white">
+            <Activity size={14} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-zinc-900">Event Volume & Status Timeline</h4>
+            <p className="text-xs text-zinc-500">Live distribution across the selected time range</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-zinc-600">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-orange-500" /> Success (2xx)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-amber-500" /> Client (4xx)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Error (5xx)
+          </span>
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600">Error rate: {errorRate}%</span>
+        </div>
+      </div>
+
+      <div className="flex h-28 items-end gap-1.5 pt-3 border-b border-zinc-100">
+        {buckets.map((bucket, idx) => {
+          const heightPercent = bucket.total ? Math.max((bucket.total / maxCount) * 100, 10) : 3;
+          return (
+            <div key={idx} className="group relative flex-1 flex flex-col justify-end h-full cursor-pointer">
+              {/* Tooltip on hover */}
+              <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-30 whitespace-nowrap rounded-lg bg-zinc-900 px-2.5 py-1.5 text-[11px] text-white shadow-xl">
+                <span className="font-semibold">{bucket.label}</span>
+                <span>
+                  {bucket.total} events ({bucket.success} ok, {bucket.clientError + bucket.serverError} err)
+                </span>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+              </div>
+
+              {/* Bar */}
+              <div
+                style={{ height: `${heightPercent}%` }}
+                className={`w-full rounded-t transition-all ${
+                  bucket.serverError > 0
+                    ? "bg-rose-500 hover:bg-rose-600"
+                    : bucket.clientError > 0
+                    ? "bg-amber-500 hover:bg-amber-600"
+                    : bucket.total > 0
+                    ? "bg-gradient-to-t from-orange-500 to-amber-400 hover:from-orange-600 hover:to-amber-500"
+                    : "bg-zinc-100/70"
+                }`}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-between text-[11px] font-medium text-zinc-400 mt-2 px-1">
+        <span>{buckets[0]?.label || "Past"}</span>
+        <span>Timeline Activity</span>
+        <span>{buckets[buckets.length - 1]?.label || "Now"}</span>
+      </div>
+    </div>
+  );
+}
+
 function RestaurantLogsWorkspace({
+  accessToken,
   restaurant,
   logs,
   totalCount,
@@ -910,11 +1059,16 @@ function RestaurantLogsWorkspace({
   setLogLevel,
   logType,
   setLogType,
+  logTimeRange,
+  setLogTimeRange,
+  logStatusCategory,
+  setLogStatusCategory,
   logPage,
   setLogPage,
   onBack,
   onRefresh,
 }: {
+  accessToken: string;
   restaurant: RestaurantRecord;
   logs: AppLogRecord[];
   totalCount: number;
@@ -924,41 +1078,88 @@ function RestaurantLogsWorkspace({
   setLogLevel: (value: "all" | "info" | "warning" | "error") => void;
   logType: LogType | "all";
   setLogType: (value: LogType | "all") => void;
+  logTimeRange: "1h" | "24h" | "7d" | "all";
+  setLogTimeRange: (value: "1h" | "24h" | "7d" | "all") => void;
+  logStatusCategory: "all" | "2xx" | "4xx" | "5xx";
+  setLogStatusCategory: (value: "all" | "2xx" | "4xx" | "5xx") => void;
   logPage: number;
   setLogPage: (value: number | ((current: number) => number)) => void;
   onBack: () => void;
   onRefresh: () => void;
 }) {
+  const [purging, setPurging] = useState(false);
   const totalLogPages = Math.max(1, Math.ceil(logs.length / LOGS_PER_PAGE));
   const paginatedLogs = logs.slice((logPage - 1) * LOGS_PER_PAGE, logPage * LOGS_PER_PAGE);
 
   // Quick stats from loaded data
-  const errorCount = logs.filter((l) => l.level === "error").length;
+  const errorCount = logs.filter((l) => l.level === "error" || (l.status_code && l.status_code >= 500)).length;
   const apiCount = logs.filter((l) => l.log_type === "api").length;
   const auditCount = logs.filter((l) => l.log_type === "audit").length;
+  const avgDuration =
+    logs.filter((l) => l.duration_ms != null).length > 0
+      ? Math.round(
+          logs.reduce((acc, l) => acc + (l.duration_ms || 0), 0) /
+            logs.filter((l) => l.duration_ms != null).length
+        )
+      : null;
+
+  async function handlePurgeOldLogs() {
+    if (!confirm("Are you sure you want to delete all logs older than 7 days? This action cannot be undone.")) return;
+    setPurging(true);
+    const res = await purgeOldAppLogs(accessToken, 7);
+    setPurging(false);
+    if (res.ok) {
+      toast.success(`Purged ${res.data.deletedCount} log records older than 7 days.`);
+      onRefresh();
+    } else {
+      toast.error(res.error || "Failed to purge old logs.");
+    }
+  }
 
   return (
     <section className="space-y-4">
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+      {/* Header */}
+      <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-2xl font-semibold tracking-tight">{restaurant.restaurant_name}</h3>
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">Logs</span>
-              <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">{totalCount} total</span>
+              <h3 className="text-2xl font-bold tracking-tight text-zinc-900">{restaurant.restaurant_name}</h3>
+              <span className="rounded-full bg-orange-50 border border-orange-200 px-2.5 py-0.5 text-xs font-semibold text-orange-700">
+                Observability & Logs
+              </span>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-semibold text-zinc-700">
+                {totalCount} total events
+              </span>
               {errorCount > 0 && (
-                <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">{errorCount} errors</span>
+                <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
+                  {errorCount} errors
+                </span>
               )}
             </div>
             <p className="mt-1 text-sm text-zinc-500">{restaurant.domain_name}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={onRefresh} className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-zinc-50">
-              <RefreshCw size={16} />
+            <button
+              onClick={handlePurgeOldLogs}
+              disabled={purging}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+              title="Delete logs older than 7 days"
+            >
+              <Trash2 size={14} />
+              {purging ? "Purging..." : "Purge >7d"}
+            </button>
+            <button
+              onClick={onRefresh}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 shadow-sm"
+            >
+              <RefreshCw size={14} />
               Refresh
             </button>
-            <button onClick={onBack} className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
-              <ArrowLeft size={16} />
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              <ArrowLeft size={14} />
               Back
             </button>
           </div>
@@ -967,60 +1168,109 @@ function RestaurantLogsWorkspace({
 
       {/* Mini stats */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">API Logs</div>
-          <div className="mt-1 text-lg font-semibold text-zinc-900">{apiCount}</div>
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 shadow-sm">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">API Calls</div>
+          <div className="mt-1 text-xl font-bold text-zinc-900">{apiCount}</div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">Logged actions</div>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Audit Logs</div>
-          <div className="mt-1 text-lg font-semibold text-zinc-900">{auditCount}</div>
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 shadow-sm">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Audit & State</div>
+          <div className="mt-1 text-xl font-bold text-zinc-900">{auditCount}</div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">Admin operations</div>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 shadow-sm">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Errors</div>
-          <div className={`mt-1 text-lg font-semibold ${errorCount > 0 ? "text-rose-600" : "text-zinc-900"}`}>{errorCount}</div>
+          <div className={`mt-1 text-xl font-bold ${errorCount > 0 ? "text-rose-600" : "text-zinc-900"}`}>
+            {errorCount}
+          </div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">{errorCount > 0 ? "Needs inspection" : "All clean"}</div>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Showing</div>
-          <div className="mt-1 text-lg font-semibold text-zinc-900">{logs.length}</div>
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 shadow-sm">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Avg Latency</div>
+          <div className="mt-1 text-xl font-bold text-orange-600">{avgDuration != null ? `${avgDuration}ms` : "—"}</div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">Execution time</div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_150px_150px]">
-          <label className="relative block">
+      {/* Live Timeline Activity Histogram */}
+      <LogActivityHistogram logs={logs} timeRange={logTimeRange} />
+
+      {/* Filters Bar */}
+      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_140px_140px_140px_130px]">
+          {/* Search */}
+          <label className="relative block sm:col-span-2 lg:col-span-1">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input
               value={logSearch}
-              onChange={(event) => setLogSearch(event.target.value)}
-              placeholder="Search action, source, or message"
-              className="w-full rounded-md border border-zinc-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-orange-500"
+              onChange={(e) => setLogSearch(e.target.value)}
+              placeholder="Filter by path, method, message, or source..."
+              className="w-full rounded-lg border border-zinc-200 bg-zinc-50/50 py-2 pl-9 pr-3 text-sm outline-none focus:border-orange-500 focus:bg-white"
             />
           </label>
-          <select defaultValue="all" value={logLevel} onChange={(event) => setLogLevel(event.target.value as typeof logLevel)} className="rounded-md border border-zinc-200 px-3 py-2.5 text-sm outline-none focus:border-orange-500">
-            <option value="all">All levels</option>
+
+          {/* Time Range */}
+          <select
+            value={logTimeRange}
+            onChange={(e) => setLogTimeRange(e.target.value as typeof logTimeRange)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 outline-none focus:border-orange-500"
+          >
+            <option value="1h">Last 1 hour</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+            <option value="all">All Time</option>
+          </select>
+
+          {/* Status Category */}
+          <select
+            value={logStatusCategory}
+            onChange={(e) => setLogStatusCategory(e.target.value as typeof logStatusCategory)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 outline-none focus:border-orange-500"
+          >
+            <option value="all">All Statuses</option>
+            <option value="2xx">2xx Success</option>
+            <option value="4xx">4xx Client Error</option>
+            <option value="5xx">5xx Server Error</option>
+          </select>
+
+          {/* Log Type */}
+          <select
+            value={logType}
+            onChange={(e) => setLogType(e.target.value as typeof logType)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 outline-none focus:border-orange-500"
+          >
+            <option value="all">All Types</option>
+            <option value="api">API Logs</option>
+            <option value="audit">Audit Logs</option>
+            <option value="system">System Logs</option>
+          </select>
+
+          {/* Log Level */}
+          <select
+            value={logLevel}
+            onChange={(e) => setLogLevel(e.target.value as typeof logLevel)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 outline-none focus:border-orange-500"
+          >
+            <option value="all">All Levels</option>
             <option value="info">Info</option>
             <option value="warning">Warning</option>
             <option value="error">Error</option>
-          </select>
-          <select defaultValue="all" value={logType} onChange={(event) => setLogType(event.target.value as typeof logType)} className="rounded-md border border-zinc-200 px-3 py-2.5 text-sm outline-none focus:border-orange-500">
-            <option value="all">All types</option>
-            <option value="api">API logs</option>
-            <option value="audit">Audit logs</option>
-            <option value="system">System logs</option>
           </select>
         </div>
       </div>
 
       {logs.length === 0 ? (
-        <EmptyWorkspace title="No logs found" body="This restaurant does not have matching API or admin action logs yet." />
+        <EmptyWorkspace
+          title="No logs match filters"
+          body="No logs match the current search or time criteria for this restaurant."
+        />
       ) : (
         <>
           {/* Desktop table view */}
-          <section className="hidden lg:block rounded-lg border border-zinc-200 bg-white shadow-sm">
+          <section className="hidden lg:block rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="border-b border-zinc-100 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                <thead className="border-b border-zinc-100 bg-zinc-50/80 text-xs uppercase tracking-wide text-zinc-500">
                   <tr>
                     <th className="px-4 py-3 whitespace-nowrap">Time</th>
                     <th className="px-4 py-3 whitespace-nowrap">Type</th>
@@ -1088,7 +1338,7 @@ function RestaurantWorkspace({
     domain_url: restaurant.domain_url ?? restaurant.domain_name,
     email: restaurant.email ?? "",
     contact: restaurant.contact ? String(restaurant.contact) : "",
-    address: restaurant.address,
+    address: formatAddress(restaurant.address),
     package: restaurant.package,
     description: restaurant.description ?? "",
     about: restaurant.about ?? "",
@@ -1097,6 +1347,24 @@ function RestaurantWorkspace({
     pos_domain: restaurant.pos_domain ?? "",
     time_zone: restaurant.time_zone ?? "Asia/Kolkata",
   });
+
+  useEffect(() => {
+    setForm({
+      restaurant_name: restaurant.restaurant_name,
+      domain_name: restaurant.domain_name,
+      domain_url: restaurant.domain_url ?? restaurant.domain_name,
+      email: restaurant.email ?? "",
+      contact: restaurant.contact ? String(restaurant.contact) : "",
+      address: formatAddress(restaurant.address),
+      package: restaurant.package,
+      description: restaurant.description ?? "",
+      about: restaurant.about ?? "",
+      gst_number: restaurant.gst_number ?? "",
+      fssai_number: restaurant.fssai_number ?? "",
+      pos_domain: restaurant.pos_domain ?? "",
+      time_zone: restaurant.time_zone ?? "Asia/Kolkata",
+    });
+  }, [restaurant]);
 
   const settingsMap = useMemo(() => new Map(settings.map((item) => [item.setting_key, item])), [settings]);
   const missingSettings = RESTAURANT_SETTING_DEFINITIONS.filter((definition) => !settingsMap.has(definition.key));
@@ -1183,7 +1451,7 @@ function RestaurantWorkspace({
                 <InfoCard label="Package" value={restaurant.package} />
                 <InfoCard label="Email" value={restaurant.email || "N/A"} />
                 <InfoCard label="Contact" value={restaurant.contact ? String(restaurant.contact) : "N/A"} />
-                <InfoCard label="Address" value={restaurant.address} className="md:col-span-2" />
+                <InfoCard label="Address" value={formatAddress(restaurant.address) || "N/A"} className="md:col-span-2" />
                 <InfoCard label="Description" value={restaurant.description || "N/A"} className="md:col-span-2" />
                 <InfoCard label="About" value={restaurant.about || "N/A"} className="md:col-span-2" />
                 <InfoCard label="GST" value={restaurant.gst_number || "N/A"} />
@@ -1357,6 +1625,10 @@ function ApplicationModal({
   onReject: () => void;
 }) {
   const address = record.address ?? {};
+  const building = String(address.address_line_1 || address.buildingno || address.street || "");
+  const area = String(address.address_line_2 || address.area || address.floor || address.landmark || "");
+  const city = String(address.city || address.town || address.village || "");
+  const pincode = String(address.pincode || address.postcode || address.postal_code || "");
   const legal = record.legal ?? {};
   const bank = record.bank ?? {};
   const images = record.images ?? {};
@@ -1381,7 +1653,7 @@ function ApplicationModal({
         <div className="overflow-y-auto p-5">
           <div className="grid gap-4 lg:grid-cols-3">
             <InfoGroup title="Owner" items={[["Name", record.owner_name], ["Email", record.email], ["Phone", record.phone], ["Primary contact", record.restaurant_primary_contact]]} />
-            <InfoGroup title="Address" items={[["Building", String(address.buildingno ?? "")], ["Area", String(address.area ?? "")], ["City", String(address.city ?? "")], ["Pincode", String(address.pincode ?? "")]]} />
+            <InfoGroup title="Address" items={[["Line 1 / Building", building], ["Line 2 / Area", area], ["City", city], ["Pincode", pincode]]} />
             <InfoGroup title="Legal" items={[["PAN", String(legal.pan_number ?? "")], ["FSSAI", String(legal.fssai_number ?? "")], ["GST", String(legal.gst_number ?? "Not registered")], ["Bank", String(bank.account_type ?? "")]]} />
           </div>
 

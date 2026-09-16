@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { insertRestaurantImageRecords, type StoredAsset } from "./restaurant-images";
-import { getSupabaseAdmin, requireSuperAdmin, toActionError, type ActionResult } from "./supabase/server";
+import { getSupabaseAdmin, requireSuperAdmin, requireStaffOrAdmin, toActionError, type ActionResult } from "./supabase/server";
 import type { OnboardingApplication } from "./onboarding-applications";
 import { writeAuditLog, loggedAction } from "./app-logs";
+import { formatAddress } from "@/src/lib/utils/address";
 
 export type RestaurantRecord = {
   id: string;
@@ -33,7 +34,7 @@ export type RestaurantRecord = {
   created_at: string;
 };
 
-type DirectRestaurantInput = {
+export type DirectRestaurantInput = {
   restaurant_name: string;
   domain_name: string;
   domain_url?: string;
@@ -51,7 +52,7 @@ type DirectRestaurantInput = {
   time_zone?: string;
 };
 
-type UpdateRestaurantInput = {
+export type UpdateRestaurantInput = {
   restaurant_name: string;
   domain_name: string;
   domain_url?: string;
@@ -67,16 +68,8 @@ type UpdateRestaurantInput = {
   time_zone?: string;
 };
 
-function compactAddress(address: Record<string, unknown>): string {
-  return [
-    address.buildingno,
-    address.floor,
-    address.area,
-    address.city,
-    address.pincode,
-  ]
-    .filter(Boolean)
-    .join(", ");
+function compactAddress(address: unknown): string {
+  return formatAddress(address);
 }
 
 function numericContact(value?: string | null): number | null {
@@ -251,7 +244,7 @@ export async function listRestaurants(accessToken: string): Promise<ActionResult
   return loggedAction(
     { actionName: "listRestaurants", httpMethod: "GET", httpPath: "/restaurants" },
     async (ctx) => {
-      const actor = await requireSuperAdmin(accessToken);
+      const actor = await requireStaffOrAdmin(accessToken);
       ctx.actorId = actor.id;
 
       const admin = getSupabaseAdmin();
@@ -262,7 +255,13 @@ export async function listRestaurants(accessToken: string): Promise<ActionResult
         .limit(50);
 
       if (error) throw new Error(error.message);
-      return { ok: true, data: (data ?? []) as RestaurantRecord[] };
+
+      const formatted = (data ?? []).map((item) => ({
+        ...item,
+        address: formatAddress(item.address),
+      }));
+
+      return { ok: true, data: formatted as RestaurantRecord[] };
     }
   );
 }
@@ -278,7 +277,7 @@ export async function createRestaurantDirect(
   return loggedAction(
     { actionName: "createRestaurantDirect", httpMethod: "POST", httpPath: "/restaurants" },
     async (ctx) => {
-      const actor = await requireSuperAdmin(accessToken);
+      const actor = await requireStaffOrAdmin(accessToken);
       ctx.actorId = actor.id;
 
       const admin = getSupabaseAdmin();
@@ -290,7 +289,7 @@ export async function createRestaurantDirect(
           domain_url: values.domain_url || values.domain_name,
           is_active: true,
           services: values.services,
-          address: values.address,
+          address: formatAddress(values.address),
           cuisines: values.cuisines,
           timings: { hours: {} },
           contact: numericContact(values.contact),
@@ -317,7 +316,7 @@ export async function createRestaurantDirect(
         restaurantId: data.id,
         entityType: "restaurant",
         entityId: data.id,
-        message: `Created restaurant ${values.restaurant_name} directly from admin console.`,
+        message: `Created restaurant ${values.restaurant_name} directly from console.`,
         metadata: { domain_name: values.domain_name, package: values.package },
       });
 
@@ -352,7 +351,7 @@ export async function updateRestaurantRecord(
           domain_url: values.domain_url || values.domain_name,
           email: values.email || null,
           contact: numericContact(values.contact),
-          address: values.address,
+          address: formatAddress(values.address),
           package: values.package,
           description: values.description || null,
           about: values.about || null,
@@ -375,12 +374,15 @@ export async function updateRestaurantRecord(
         restaurantId,
         entityType: "restaurant",
         entityId: restaurantId,
-        message: `Updated restaurant ${values.restaurant_name}.`,
-        metadata: { domain_name: values.domain_name, package: values.package },
+        message: `Updated restaurant details for ${values.restaurant_name}.`,
       });
 
       revalidatePath("/dashboard");
-      return { ok: true, data: data as RestaurantRecord };
+      const formatted = {
+        ...data,
+        address: formatAddress(data.address),
+      };
+      return { ok: true, data: formatted as RestaurantRecord };
     }
   );
 }
@@ -446,6 +448,15 @@ export async function deleteRestaurantRecord(
       ctx.restaurantId = restaurantId;
 
       const admin = getSupabaseAdmin();
+
+      // Proactively delete dependent child records before deleting restaurant.
+      // This prevents "null value in column 'restaurant_id' of relation 'restaurant_settings' violates not-null constraint"
+      // or foreign-key check failures when foreign keys are ON DELETE SET NULL on a NOT NULL column.
+      await admin.from("restaurant_settings").delete().eq("restaurant_id", restaurantId);
+      await admin.from("restaurant_images").delete().eq("restaurant_id", restaurantId);
+      await admin.from("onboarding_applications").update({ restaurant_id: null }).eq("restaurant_id", restaurantId);
+      await admin.from("profiles").update({ restaurant_id: null }).eq("restaurant_id", restaurantId);
+
       const { error } = await admin.from("restaurants").delete().eq("id", restaurantId);
       if (error) throw new Error(error.message);
 

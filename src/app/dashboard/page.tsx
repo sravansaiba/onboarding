@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminDashboard from "@/src/components/AdminDashboard";
+import StaffDashboard from "@/src/components/StaffDashboard";
 import CustomerDashboard from "@/src/components/CustomerDashboard";
 import { getCurrentProfile, type AppProfile } from "@/src/app/actions/profiles";
 import { supabase } from "@/src/lib/supabase/client";
@@ -76,8 +77,13 @@ export default function DashboardPage() {
     );
   }
 
-  if (["super_admin", "admin"].includes(profile.role)) {
+  const roleNormalized = (profile.role || "").trim().toLowerCase().replace(/-/g, "_");
+  if (roleNormalized === "super_admin") {
     return <AdminDashboard accessToken={accessToken} profile={profile} onLogout={handleLogout} />;
+  }
+
+  if (roleNormalized === "staff") {
+    return <StaffDashboard accessToken={accessToken} profile={profile} onLogout={handleLogout} />;
   }
 
   return <CustomerDashboard accessToken={accessToken} profile={profile} onLogout={handleLogout} />;

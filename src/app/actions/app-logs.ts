@@ -64,19 +64,21 @@ type ApiLogInput = BaseLogInput & {
 // List options
 // ---------------------------------------------------------------------------
 
-type ListLogOptions = {
+export type ListLogOptions = {
   accessToken: string;
   restaurantId?: string;
   source?: string;
   level?: LogLevel | "all";
   logType?: LogType | "all";
   statusCode?: number;
+  statusCategory?: "all" | "2xx" | "4xx" | "5xx";
+  timeRange?: "1h" | "24h" | "7d" | "all";
   query?: string;
   limit?: number;
   offset?: number;
 };
 
-type ListLogResult = {
+export type ListLogResult = {
   records: AppLogRecord[];
   totalCount: number;
 };
@@ -179,27 +181,6 @@ type LoggedActionConfig = {
 
 /**
  * Production-grade server action wrapper.
- *
- * - Automatically times every call (duration_ms)
- * - Logs success with 200 status code
- * - Logs errors with appropriate status codes (401, 403, 400, 500)
- * - Classifies errors by type (auth, validation, server)
- * - All writes are fire-and-forget — never blocks the response
- *
- * Usage:
- * ```ts
- * export async function myAction(token: string) {
- *   return loggedAction(
- *     { actionName: "myAction", httpMethod: "GET", httpPath: "/my-resource" },
- *     async (ctx) => {
- *       const actor = await requireSuperAdmin(token);
- *       ctx.actorId = actor.id;
- *       // ... your logic
- *       return { ok: true, data: result };
- *     }
- *   );
- * }
- * ```
  */
 export async function loggedAction<T>(
   config: LoggedActionConfig,
@@ -320,9 +301,31 @@ export async function listAppLogs(options: ListLogOptions): Promise<ActionResult
       query = query.eq("status_code", options.statusCode);
     }
 
+    // Status category filter: 2xx (success), 4xx (client errors), 5xx (server errors)
+    if (options.statusCategory && options.statusCategory !== "all") {
+      if (options.statusCategory === "2xx") {
+        query = query.gte("status_code", 200).lt("status_code", 300);
+      } else if (options.statusCategory === "4xx") {
+        query = query.gte("status_code", 400).lt("status_code", 500);
+      } else if (options.statusCategory === "5xx") {
+        query = query.gte("status_code", 500).lt("status_code", 600);
+      }
+    }
+
+    // Time range filter
+    if (options.timeRange && options.timeRange !== "all") {
+      const msMap = {
+        "1h": 60 * 60 * 1000,
+        "24h": 24 * 60 * 60 * 1000,
+        "7d": 7 * 24 * 60 * 60 * 1000,
+      };
+      const cutoff = new Date(Date.now() - (msMap[options.timeRange] ?? 0)).toISOString();
+      query = query.gte("created_at", cutoff);
+    }
+
     if (options.query?.trim()) {
       const search = `%${options.query.trim()}%`;
-      query = query.or(`message.ilike.${search},event_type.ilike.${search},source.ilike.${search}`);
+      query = query.or(`message.ilike.${search},event_type.ilike.${search},source.ilike.${search},http_path.ilike.${search}`);
     }
 
     const { data, error, count } = await query;
@@ -339,6 +342,39 @@ export async function listAppLogs(options: ListLogOptions): Promise<ActionResult
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not load logs.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Purge Old Logs — manual cleanup for super admin (default > 7 days)
+// ---------------------------------------------------------------------------
+
+export async function purgeOldAppLogs(
+  accessToken: string,
+  days: number = 7
+): Promise<ActionResult<{ deletedCount: number }>> {
+  try {
+    await requireSuperAdmin(accessToken);
+    const admin = getSupabaseAdmin();
+    const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data, error } = await admin
+      .from("app_logs")
+      .delete()
+      .lt("created_at", cutoffDate)
+      .select("id");
+
+    if (error) throw new Error(error.message);
+
+    return {
+      ok: true,
+      data: { deletedCount: data?.length ?? 0 },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not purge old logs.",
     };
   }
 }

@@ -74,10 +74,34 @@ export async function getUserFromAccessToken(accessToken: string): Promise<Authe
   };
 }
 
+export function isSuperAdminRole(role?: string | null): boolean {
+  if (!role) return false;
+  const normalized = role.trim().toLowerCase().replace(/-/g, "_");
+  return normalized === "super_admin";
+}
+
+export function isStaffRole(role?: string | null): boolean {
+  if (!role) return false;
+  const normalized = role.trim().toLowerCase().replace(/-/g, "_");
+  return normalized === "staff";
+}
+
+export function isStaffOrSuperAdminRole(role?: string | null): boolean {
+  return isSuperAdminRole(role) || isStaffRole(role);
+}
+
 export async function requireSuperAdmin(accessToken: string): Promise<AuthenticatedUser> {
   const user = await getUserFromAccessToken(accessToken);
-  if (!["super_admin", "admin"].includes(user.role)) {
+  if (!isSuperAdminRole(user.role)) {
     throw new Error("Only a super admin can perform this action.");
+  }
+  return user;
+}
+
+export async function requireStaffOrAdmin(accessToken: string): Promise<AuthenticatedUser> {
+  const user = await getUserFromAccessToken(accessToken);
+  if (!isStaffOrSuperAdminRole(user.role)) {
+    throw new Error("Only staff or super admin can perform this action.");
   }
   return user;
 }
