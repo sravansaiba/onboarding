@@ -7,6 +7,7 @@ import StaffDashboard from "@/src/components/StaffDashboard";
 import CustomerDashboard from "@/src/components/CustomerDashboard";
 import { getCurrentProfile, type AppProfile } from "@/src/app/actions/profiles";
 import { supabase } from "@/src/lib/supabase/client";
+import { clearAuthSession, getAuthSession, saveAuthSession } from "@/src/lib/auth-storage";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -18,7 +19,8 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadProfile() {
       const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token || localStorage.getItem("accessToken") || sessionStorage.getItem("accessToken") || "";
+      const session = getAuthSession();
+      const token = data.session?.access_token || session.accessToken || "";
 
       if (!token) {
         router.push("/login");
@@ -32,9 +34,7 @@ export default function DashboardPage() {
         return;
       }
 
-      localStorage.setItem("accessToken", token);
-      localStorage.setItem("user", JSON.stringify(result.data));
-      localStorage.setItem("isLoggedIn", "true");
+      saveAuthSession(token, result.data, true);
       setAccessToken(token);
       setProfile(result.data);
       setLoading(false);
@@ -45,10 +45,7 @@ export default function DashboardPage() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    ["accessToken", "user", "isLoggedIn", "jwt"].forEach((key) => {
-      localStorage.removeItem(key);
-      sessionStorage.removeItem(key);
-    });
+    clearAuthSession();
     router.push("/login");
   }
 

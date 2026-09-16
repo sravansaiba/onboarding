@@ -1,11 +1,13 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BarChart3, Check, ChefHat, ChevronDown, ClipboardCheck, QrCode, Settings2, Star, Truck, X } from "lucide-react";
 import { Header } from "@/src/layout/Header";
 import { Footer } from "@/src/layout/Footer";
 import { supabase } from "@/src/lib/supabase/client";
+import { getAuthSession } from "@/src/lib/auth-storage";
 
 const PACKAGES = {
   "marinate-menu": {
@@ -36,10 +38,13 @@ export default function HomePage() {
 
   useEffect(() => {
     async function loadSession() {
+      const session = getAuthSession();
+      if (session.isLoggedIn) {
+        setIsLoggedIn(true);
+        return;
+      }
       const { data } = await supabase.auth.getSession();
-      const storedUser = localStorage.getItem("user") || sessionStorage.getItem("user");
-      const parsedUser = storedUser ? JSON.parse(storedUser) : null;
-      setIsLoggedIn(Boolean(data.session || parsedUser));
+      setIsLoggedIn(Boolean(data.session));
     }
 
     loadSession();
@@ -143,10 +148,10 @@ export default function HomePage() {
 
       <section className="border-t border-orange-100 bg-[#fff8f1] px-4 py-16">
         <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="rounded-2xl bg-zinc-950 p-6 text-white shadow-xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-300">FAQ</p>
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight">Frequently asked questions</h2>
-            <p className="mt-4 leading-7 text-white/70">
+          <div className="rounded-2xl border border-orange-100 bg-white p-6 shadow-sm">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-600">FAQ</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950">Frequently asked questions</h2>
+            <p className="mt-4 leading-7 text-zinc-600">
               Clear answers for restaurants exploring QR ordering, POS workflows, and Marinate360 plans.
             </p>
             <button onClick={startRegistration} className="mt-6 rounded-md bg-orange-500 px-5 py-3 text-sm font-semibold text-white hover:bg-orange-600">
@@ -209,6 +214,48 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* CTA Showcase Banner above Footer */}
+      <section className="border-t border-orange-100 bg-[#fff8f1] px-4 py-16">
+        <div className="mx-auto max-w-7xl overflow-hidden rounded-2xl border border-orange-100 bg-white p-8 shadow-sm sm:p-12">
+          <div className="grid items-center gap-10 lg:grid-cols-2">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-orange-600">
+                Ready to transform your restaurant?
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl text-zinc-950">
+                Join modern food brands running on <span className="text-orange-600">Marinate360</span>
+              </h2>
+              <p className="mt-4 leading-8 text-zinc-600">
+                Streamline QR ordering, staff coordination, kitchen tickets, takeaway, and digital menu operations in one unified operating layer.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-4">
+                <button
+                  onClick={startRegistration}
+                  className="rounded-md bg-orange-500 px-7 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-orange-600"
+                >
+                  Register your restaurant
+                </button>
+                <button
+                  onClick={() => router.push("/login")}
+                  className="rounded-md border border-zinc-200 bg-white px-6 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-orange-50 hover:text-orange-600"
+                >
+                  Partner Login &rarr;
+                </button>
+              </div>
+            </div>
+
+            <div className="relative h-[280px] sm:h-[350px] w-full overflow-hidden rounded-xl border border-orange-100 shadow-sm">
+              <Image
+                src="/bg1.png"
+                alt="Marinate360 Team & Operations"
+                fill
+                className="object-cover object-center"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
       <Footer />
     </main>

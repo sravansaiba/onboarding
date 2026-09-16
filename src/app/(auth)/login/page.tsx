@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, LogIn } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, LogIn } from "lucide-react";
 import { useState } from "react";
 import { getCurrentProfile } from "@/src/app/actions/profiles";
 import { supabase } from "@/src/lib/supabase/client";
+import { saveAuthSession } from "@/src/lib/auth-storage";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -42,32 +43,40 @@ export default function LoginPage() {
           restaurant_id: null,
         };
 
-    const storage = rememberMe ? localStorage : sessionStorage;
-    storage.setItem("accessToken", data.session.access_token);
-    storage.setItem("user", JSON.stringify(profile));
-    storage.setItem("isLoggedIn", "true");
+    // Save token and profile to cookies
+    saveAuthSession(data.session.access_token, profile, rememberMe);
 
     router.push("/dashboard");
   }
 
   return (
-    <main className="min-h-screen bg-[#fff7ed] px-4 py-10 text-zinc-950">
-      <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1fr_440px]">
+    <main className="min-h-screen bg-[#fff7ed] px-4 py-8 text-zinc-950">
+      {/* Top single back button */}
+      <div className="mx-auto max-w-6xl pb-4">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 rounded-lg border border-orange-200/80 bg-white/90 px-3.5 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition hover:border-orange-300 hover:bg-white hover:text-orange-600"
+        >
+          <ArrowLeft size={14} />
+          Back to Home
+        </Link>
+      </div>
+
+      <div className="mx-auto grid min-h-[calc(100vh-8rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1fr_440px]">
         <section className="hidden lg:block">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-600">marinate360 onboarding</p>
           <h1 className="mt-4 max-w-2xl text-5xl font-extrabold leading-tight">
             Bring every restaurant registration into one clean flow.
           </h1>
-          
         </section>
 
+        {/* Right Side: Sign-in Card */}
         <section className="rounded-2xl border border-orange-100 bg-white p-6 shadow-xl shadow-orange-100/70 sm:p-8">
           <div className="mb-8">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-white">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm shadow-orange-200">
               <LogIn size={24} />
             </div>
-            <h2 className="text-2xl font-bold">Sign in</h2>
-            {/* <p className="mt-1 text-sm text-zinc-500">Use your account to continue.</p> */}
+            <h2 className="text-2xl font-bold text-zinc-900">Sign in</h2>
           </div>
 
           {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}

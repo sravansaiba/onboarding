@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, UserPlus } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { ensureCustomerProfile } from "@/src/app/actions/profiles";
 import { supabase } from "@/src/lib/supabase/client";
+import { saveAuthSession } from "@/src/lib/auth-storage";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -56,9 +57,7 @@ export default function SignupPage() {
       });
 
       if (profileResult.ok) {
-        localStorage.setItem("accessToken", data.session.access_token);
-        localStorage.setItem("user", JSON.stringify(profileResult.data));
-        localStorage.setItem("isLoggedIn", "true");
+        saveAuthSession(data.session.access_token, profileResult.data, true);
         router.push("/");
         return;
       }
@@ -69,15 +68,34 @@ export default function SignupPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#fff7ed] px-4 py-10 text-zinc-950">
-      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-md items-center">
+    <main className="min-h-screen bg-[#fff7ed] px-4 py-8 text-zinc-950">
+      <div className="mx-auto max-w-md pb-4">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 rounded-lg border border-orange-200/80 bg-white/90 px-3.5 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition hover:border-orange-300 hover:bg-white hover:text-orange-600"
+        >
+          <ArrowLeft size={14} />
+          Back to Home
+        </Link>
+      </div>
+
+      <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-md items-center">
         <section className="w-full rounded-2xl border border-orange-100 bg-white p-6 shadow-xl shadow-orange-100/70 sm:p-8">
-          <div className="mb-8">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-white">
-              <UserPlus size={24} />
+          <div className="mb-6 flex items-start justify-between">
+            <div>
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-white">
+                <UserPlus size={24} />
+              </div>
+              <h1 className="text-2xl font-bold">Create your account</h1>
+              <p className="mt-1 text-xs text-zinc-500">Register first, then submit your restaurant onboarding form.</p>
             </div>
-            <h1 className="text-2xl font-bold">Create your account</h1>
-            <p className="mt-1 text-sm text-zinc-500">Register first, then submit your restaurant onboarding form.</p>
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-zinc-500 hover:bg-orange-50 hover:text-orange-700"
+            >
+              <ArrowLeft size={13} />
+              Home
+            </Link>
           </div>
 
           {success && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}

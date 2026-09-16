@@ -4,6 +4,7 @@ import { LayoutDashboard, LogIn, Menu, UserRound, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { clearAuthSession, getAuthSession } from "@/src/lib/auth-storage";
 
 interface User {
   username?: string;
@@ -28,28 +29,18 @@ export function Header() {
   useEffect(() => {
     const loadUserData = () => {
       try {
-        const getFromStorage = (key: string) => sessionStorage.getItem(key) || localStorage.getItem(key);
-        const storedUser = getFromStorage("user");
-        const storedIsLoggedIn = getFromStorage("isLoggedIn");
-
-        let parsedUser: User | null = null;
-        let username = "";
-        let role = "";
-        let email = "";
-
-        if (storedUser) {
-          try {
-            parsedUser = JSON.parse(storedUser);
-            username = parsedUser?.username || parsedUser?.name || parsedUser?.email?.split("@")[0] || "User";
-            role = parsedUser?.role || "customer";
-            email = parsedUser?.email || "";
-          } catch (error) {
-            console.error("Error parsing user data:", error);
-          }
+        const session = getAuthSession();
+        if (session.isLoggedIn && session.user) {
+          const parsedUser = session.user;
+          const username = parsedUser?.username || parsedUser?.name || parsedUser?.email?.split("@")[0] || "User";
+          const role = parsedUser?.role || "customer";
+          const email = parsedUser?.email || "";
+          setUser({ username, isLoggedIn: true, role, email });
+        } else if (session.isLoggedIn && session.accessToken) {
+          setUser({ username: "User", isLoggedIn: true, role: "customer", email: "" });
+        } else {
+          setUser({ isLoggedIn: false });
         }
-
-        const isLoggedIn = Boolean(parsedUser) || storedIsLoggedIn === "true";
-        setUser(isLoggedIn && username ? { username, isLoggedIn: true, role, email } : { isLoggedIn: false });
       } catch (error) {
         console.error("Error loading user data:", error);
         setUser({ isLoggedIn: false });
@@ -59,10 +50,8 @@ export function Header() {
     loadUserData();
     const timeoutId = window.setTimeout(loadUserData, 200);
 
-    const handleStorageChange = (event: StorageEvent) => {
-      if (["user", "isLoggedIn"].includes(event.key || "")) {
-        loadUserData();
-      }
+    const handleStorageChange = () => {
+      loadUserData();
     };
 
     window.addEventListener("storage", handleStorageChange);
@@ -101,12 +90,7 @@ export function Header() {
 
   const handleLogout = () => {
     if (!window.confirm("Are you sure you want to logout?")) return;
-
-    ["user", "isLoggedIn", "jwt", "accessToken"].forEach((key) => {
-      localStorage.removeItem(key);
-      sessionStorage.removeItem(key);
-    });
-
+    clearAuthSession();
     setUser({ isLoggedIn: false });
     setShowProfileDropdown(false);
     setIsMenuOpen(false);
