@@ -28,32 +28,29 @@ const PACKAGES = {
     summary: "The complete operating package for dine-in, delivery, takeaway, and catering.",
     points: ["Delivery and takeaway management", "Reservations and catering", "Analytics and reports"],
   },
+  "marinate-foodtruck": {
+    label: "Marinate Foodtruck",
+    services: ["dine_in", "takeaway"],
+    summary: "Built for food trucks and fast counter setups with instant QR menus and quick takeaway flow.",
+    points: ["Quick counter & takeaway ordering", "Mobile QR menu & digital payments", "Fast kitchen tickets & simple workflow"],
+  },
 } as const;
 
 export default function HomePage() {
   const router = useRouter();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showPackages, setShowPackages] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<keyof typeof PACKAGES>("marinate-menu");
 
-  useEffect(() => {
-    async function loadSession() {
-      const session = getAuthSession();
-      if (session.isLoggedIn) {
-        setIsLoggedIn(true);
-        return;
-      }
-      const { data } = await supabase.auth.getSession();
-      setIsLoggedIn(Boolean(data.session));
-    }
-
-    loadSession();
-  }, []);
-
   const selected = useMemo(() => PACKAGES[selectedPackage], [selectedPackage]);
 
+  function checkIsAuthenticated(): boolean {
+    const session = getAuthSession();
+    return Boolean(session.isLoggedIn && session.accessToken && session.accessToken.trim() !== "");
+  }
+
   function startRegistration() {
-    if (!isLoggedIn) {
+    if (!checkIsAuthenticated()) {
+      setShowPackages(false);
       router.push("/login");
       return;
     }
@@ -61,6 +58,12 @@ export default function HomePage() {
   }
 
   function continueToOnboarding() {
+    if (!checkIsAuthenticated()) {
+      setShowPackages(false);
+      router.push("/login");
+      return;
+    }
+
     router.push(`/onboarding?services=${encodeURIComponent(selected.services.join(","))}&package=${encodeURIComponent(selectedPackage)}`);
   }
 
@@ -160,7 +163,7 @@ export default function HomePage() {
           </div>
           <div className="space-y-4">
             <FAQ question="What can I run with Marinate360?" answer="You can manage QR code menus, table ordering, kitchen tickets, takeaway, delivery, reservations, customer service requests, and business insights based on the plan you choose." />
-            <FAQ question="Which plan should I choose?" answer="Marinate Menu is ideal for QR menu setup, Marinate Dine is built for dine-in automation, and Marinate 360 is for restaurants that need the complete operating suite." />
+            <FAQ question="Which plan should I choose?" answer="Marinate Menu is ideal for QR menu setup, Marinate Dine is built for dine-in automation, Marinate Foodtruck is tailored for fast counter & food truck workflows, and Marinate 360 is for restaurants that need the complete operating suite." />
             <FAQ question="Do I need a technical team to get started?" answer="No. The setup flow is built for restaurant teams. You provide your business details and preferred plan, and the product setup can be configured for your restaurant." />
             <FAQ question="Can I upgrade later?" answer="Yes. Restaurants can start with a focused plan and move to a broader plan when they need dine-in automation, delivery, reservations, analytics, or more advanced operations." />
             <FAQ question="Does it work for dine-in, takeaway, and delivery?" answer="Yes. Marinate360 is designed for multiple restaurant formats, including dine-in restaurants, quick-service outlets, cloud kitchens, takeaway counters, and delivery operations." />

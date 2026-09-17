@@ -3,6 +3,7 @@
 "use client";
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
+import Image from "next/image";
 import {
   Activity,
   ArrowLeft,
@@ -11,9 +12,12 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
+  ExternalLink,
   FileClock,
+  FileText,
   LayoutDashboard,
   LogOut,
+  Pencil,
   Plus,
   Power,
   RefreshCw,
@@ -25,19 +29,19 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  deleteOnboardingApplication,
   listOnboardingApplications,
   type ApplicationStatus,
   type OnboardingApplication,
 } from "@/src/app/actions/onboarding-applications";
 import {
   approveOnboardingApplication,
-  createRestaurantDirect,
   deleteRestaurantRecord,
+  getRestaurantDetails,
   listRestaurants,
   rejectOnboardingApplication,
   setRestaurantActiveState,
   type RestaurantRecord,
-  updateRestaurantRecord,
 } from "@/src/app/actions/restaurants";
 import {
   deleteRestaurantSetting,
@@ -51,6 +55,8 @@ import { supabase } from "@/src/lib/supabase/client";
 import { RESTAURANT_SETTING_DEFINITIONS, type RestaurantSettingDefinition } from "@/src/lib/constants/restaurant-settings";
 import { formatAddress } from "@/src/lib/utils/address";
 import UsersManagementView from "./admin/UsersManagementView";
+import CreateRestaurantModal from "@/src/components/modals/CreateRestaurantModal";
+import EditRestaurantModal from "@/src/components/modals/EditRestaurantModal";
 
 type Props = {
   accessToken: string;
@@ -70,6 +76,8 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
   const [restaurants, setRestaurants] = useState<RestaurantRecord[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<OnboardingApplication | null>(null);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState("");
+  const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantRecord | null>(null);
+  const [editingRestaurant, setEditingRestaurant] = useState<RestaurantRecord | null>(null);
   const [selectedLogRestaurantId, setSelectedLogRestaurantId] = useState("");
   const [restaurantPanelTab, setRestaurantPanelTab] = useState<RestaurantPanelTab>("overview");
   const [settings, setSettings] = useState<RestaurantSetting[]>([]);
@@ -124,6 +132,19 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
       }
     },
     [accessToken]
+  );
+
+  const loadSelectedRestaurantDetails = useCallback(
+    async (restaurantId: string) => {
+      const result = await getRestaurantDetails(accessToken, restaurantId);
+      if (result.ok) {
+        setSelectedRestaurant(result.data);
+      } else {
+        const fallback = restaurants.find((r) => r.id === restaurantId) ?? null;
+        setSelectedRestaurant(fallback);
+      }
+    },
+    [accessToken, restaurants]
   );
 
   const loadLogs = useCallback(
@@ -183,14 +204,16 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
 
   useEffect(() => {
     if (!selectedRestaurantId) {
+      setSelectedRestaurant(null);
       return;
     }
 
     const timeout = window.setTimeout(() => {
       void loadRestaurantSettings(selectedRestaurantId);
+      void loadSelectedRestaurantDetails(selectedRestaurantId);
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [loadRestaurantSettings, selectedRestaurantId]);
+  }, [loadRestaurantSettings, loadSelectedRestaurantDetails, selectedRestaurantId]);
 
   useEffect(() => {
     if (activeView !== "logs") return;
@@ -213,7 +236,6 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     };
   }, [records, restaurants]);
 
-  const selectedRestaurant = restaurants.find((restaurant) => restaurant.id === selectedRestaurantId) ?? null;
   const selectedLogRestaurant = restaurants.find((restaurant) => restaurant.id === selectedLogRestaurantId) ?? null;
 
   const packageDistribution = useMemo(() => {
@@ -260,6 +282,22 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     await refreshDashboard();
   }
 
+  async function handleDeleteApplication(record: OnboardingApplication) {
+    if (!confirm(`Permanently delete the application for "${record.restaurant_name}"? This will remove it from the queue.`)) return;
+    setProcessingId(record.id);
+    const result = await deleteOnboardingApplication(accessToken, record.id);
+    setProcessingId("");
+
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+
+    toast.success("Application deleted from queue");
+    setSelectedRecord(null);
+    await refreshDashboard();
+  }
+
   async function handleToggleRestaurantState() {
     if (!selectedRestaurant) return;
     const result = await setRestaurantActiveState(accessToken, selectedRestaurant.id, !selectedRestaurant.is_active);
@@ -268,6 +306,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
       return;
     }
     toast.success(result.data.is_active ? "Restaurant activated" : "Restaurant deactivated");
+    setSelectedRestaurant((prev) => (prev ? { ...prev, is_active: result.data.is_active } : null));
     await refreshDashboard();
   }
 
@@ -281,23 +320,13 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     }
     toast.success("Restaurant deleted");
     setSelectedRestaurantId("");
+    setSelectedRestaurant(null);
     await refreshDashboard();
   }
 
   function handleLogoutRequest() {
     if (!confirm("Are you sure you want to logout?")) return;
     onLogout();
-  }
-
-  async function handleRestaurantSave(values: RestaurantEditorValues) {
-    if (!selectedRestaurant) return;
-    const result = await updateRestaurantRecord(accessToken, selectedRestaurant.id, values);
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
-    }
-    toast.success("Restaurant details updated");
-    await refreshDashboard();
   }
 
   async function handleAddSetting(definition: RestaurantSettingDefinition) {
@@ -417,6 +446,8 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                   loading={loading}
                   compact
                   onReview={setSelectedRecord}
+                  onDelete={(rec) => void handleDeleteApplication(rec)}
+                  restaurants={restaurants}
                   search={search}
                   setSearch={setSearch}
                   status={status}
@@ -433,6 +464,8 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                 records={records}
                 loading={loading}
                 onReview={setSelectedRecord}
+                onDelete={(rec) => void handleDeleteApplication(rec)}
+                restaurants={restaurants}
                 search={search}
                 setSearch={setSearch}
                 status={status}
@@ -452,7 +485,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                   activeTab={restaurantPanelTab}
                   onTabChange={setRestaurantPanelTab}
                   onBack={() => setSelectedRestaurantId("")}
-                  onSaveDetails={handleRestaurantSave}
+                  onEdit={() => setEditingRestaurant(selectedRestaurant)}
                   onToggleState={handleToggleRestaurantState}
                   onDelete={handleDeleteRestaurant}
                   onAddSetting={handleAddSetting}
@@ -526,15 +559,32 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
           onClose={() => setSelectedRecord(null)}
           onApprove={() => void handleApprove(selectedRecord)}
           onReject={() => void handleReject(selectedRecord)}
+          onDelete={() => void handleDeleteApplication(selectedRecord)}
         />
       )}
 
       {showCreate && (
-        <DirectRestaurantModal
+        <CreateRestaurantModal
           accessToken={accessToken}
           onClose={() => setShowCreate(false)}
-          onCreated={async () => {
+          onCreated={async (newId) => {
             setShowCreate(false);
+            await refreshDashboard();
+            setSelectedRestaurantId(newId);
+            setActiveView("restaurants");
+          }}
+        />
+      )}
+
+      {editingRestaurant && (
+        <EditRestaurantModal
+          accessToken={accessToken}
+          restaurant={editingRestaurant}
+          onClose={() => setEditingRestaurant(null)}
+          onUpdated={async (updated) => {
+            setEditingRestaurant(null);
+            setSelectedRestaurant(updated);
+            setRestaurants((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
             await refreshDashboard();
           }}
         />
@@ -697,6 +747,8 @@ function ApplicationsTable({
   records,
   loading,
   onReview,
+  onDelete,
+  restaurants,
   search,
   setSearch,
   status,
@@ -709,6 +761,8 @@ function ApplicationsTable({
   records: OnboardingApplication[];
   loading: boolean;
   onReview: (record: OnboardingApplication) => void;
+  onDelete: (record: OnboardingApplication) => void;
+  restaurants: RestaurantRecord[];
   search: string;
   setSearch: (value: string) => void;
   status: ApplicationStatus | "all";
@@ -718,6 +772,15 @@ function ApplicationsTable({
   totalPages: number;
   compact?: boolean;
 }) {
+  const restaurantMap = useMemo(() => {
+    const map = new Map<string, RestaurantRecord>();
+    restaurants.forEach((r) => {
+      map.set(r.id, r);
+      if (r.domain_name) map.set(r.domain_name.toLowerCase(), r);
+    });
+    return map;
+  }, [restaurants]);
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-100 p-4">
@@ -758,53 +821,111 @@ function ApplicationsTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+        <table className="w-full min-w-[840px] text-left text-sm">
           <thead className="border-b border-zinc-100 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-4 py-3">Restaurant</th>
               <th className="px-4 py-3">Owner</th>
               <th className="px-4 py-3">Package</th>
               <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Action</th>
+              <th className="px-4 py-3">Date</th>
+              <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-zinc-500">
+                <td colSpan={6} className="px-4 py-10 text-center text-zinc-500">
                   Loading applications...
                 </td>
               </tr>
             ) : records.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-zinc-500">
+                <td colSpan={6} className="px-4 py-10 text-center text-zinc-500">
                   No applications found.
                 </td>
               </tr>
             ) : (
-              records.map((record) => (
-                <tr key={record.id} className="hover:bg-orange-50/40">
-                  <td className="px-4 py-3">
-                    <div className="font-semibold text-zinc-950">{record.restaurant_name}</div>
-                    <div className="text-xs text-zinc-500">{record.domain_name}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div>{record.owner_name}</div>
-                    <div className="text-xs text-zinc-500">{record.email}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">{record.package}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={record.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => onReview(record)} className="font-semibold text-orange-600 hover:text-orange-700">
-                      Review
-                    </button>
-                  </td>
-                </tr>
-              ))
+              records.map((record) => {
+                const linkedRest = record.restaurant_id
+                  ? restaurantMap.get(record.restaurant_id)
+                  : restaurantMap.get(record.domain_name.toLowerCase());
+
+                return (
+                  <tr key={record.id} className="hover:bg-orange-50/40">
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-zinc-950">{record.restaurant_name}</div>
+                      <div className="text-xs text-zinc-500">{record.domain_name}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-zinc-800">{record.owner_name}</div>
+                      <div className="text-xs text-zinc-500">{record.email}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">
+                        {record.package.replace("marinate-", "")}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={record.status} />
+                      {record.status === "accepted" && (
+                        linkedRest ? (
+                          <span
+                            className={`block mt-1 text-[11px] font-semibold ${
+                              linkedRest.is_active ? "text-emerald-700" : "text-zinc-500"
+                            }`}
+                          >
+                            {linkedRest.is_active ? "● Live Outlet" : "○ Deactivated Outlet"}
+                          </span>
+                        ) : (
+                          <span className="block mt-1 text-[11px] font-semibold text-rose-600">
+                            ✕ Restaurant Deleted
+                          </span>
+                        )
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {record.status === "accepted" ? (
+                        <div>
+                          <span className="text-xs font-semibold text-emerald-800">Accepted</span>
+                          <p className="text-[11px] text-zinc-500">
+                            {formatDateTime(record.reviewed_at || record.updated_at)}
+                          </p>
+                        </div>
+                      ) : record.status === "rejected" ? (
+                        <div>
+                          <span className="text-xs font-semibold text-rose-700">Rejected</span>
+                          <p className="text-[11px] text-zinc-500">
+                            {formatDateTime(record.reviewed_at || record.updated_at)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-xs font-semibold text-zinc-800">Submitted</span>
+                          <p className="text-[11px] text-zinc-500">{formatDateTime(record.created_at)}</p>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          onClick={() => onReview(record)}
+                          className="rounded-md border border-orange-200 bg-orange-50/60 px-2.5 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+                        >
+                          Review
+                        </button>
+                        <button
+                          onClick={() => onDelete(record)}
+                          title="Permanently delete application from queue"
+                          className="rounded-md p-1 text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -1312,7 +1433,7 @@ function RestaurantWorkspace({
   activeTab,
   onTabChange,
   onBack,
-  onSaveDetails,
+  onEdit,
   onToggleState,
   onDelete,
   onAddSetting,
@@ -1324,48 +1445,13 @@ function RestaurantWorkspace({
   activeTab: RestaurantPanelTab;
   onTabChange: (value: RestaurantPanelTab) => void;
   onBack: () => void;
-  onSaveDetails: (values: RestaurantEditorValues) => void;
+  onEdit: () => void;
   onToggleState: () => void;
   onDelete: () => void;
   onAddSetting: (definition: RestaurantSettingDefinition) => void;
   onUpdateSetting: (settingKey: string, settingValue: string) => void;
   onRemoveSetting: (settingKey: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState<RestaurantEditorValues>({
-    restaurant_name: restaurant.restaurant_name,
-    domain_name: restaurant.domain_name,
-    domain_url: restaurant.domain_url ?? restaurant.domain_name,
-    email: restaurant.email ?? "",
-    contact: restaurant.contact ? String(restaurant.contact) : "",
-    address: formatAddress(restaurant.address),
-    package: restaurant.package,
-    description: restaurant.description ?? "",
-    about: restaurant.about ?? "",
-    gst_number: restaurant.gst_number ?? "",
-    fssai_number: restaurant.fssai_number ?? "",
-    pos_domain: restaurant.pos_domain ?? "",
-    time_zone: restaurant.time_zone ?? "Asia/Kolkata",
-  });
-
-  useEffect(() => {
-    setForm({
-      restaurant_name: restaurant.restaurant_name,
-      domain_name: restaurant.domain_name,
-      domain_url: restaurant.domain_url ?? restaurant.domain_name,
-      email: restaurant.email ?? "",
-      contact: restaurant.contact ? String(restaurant.contact) : "",
-      address: formatAddress(restaurant.address),
-      package: restaurant.package,
-      description: restaurant.description ?? "",
-      about: restaurant.about ?? "",
-      gst_number: restaurant.gst_number ?? "",
-      fssai_number: restaurant.fssai_number ?? "",
-      pos_domain: restaurant.pos_domain ?? "",
-      time_zone: restaurant.time_zone ?? "Asia/Kolkata",
-    });
-  }, [restaurant]);
-
   const settingsMap = useMemo(() => new Map(settings.map((item) => [item.setting_key, item])), [settings]);
   const missingSettings = RESTAURANT_SETTING_DEFINITIONS.filter((definition) => !settingsMap.has(definition.key));
 
@@ -1390,8 +1476,9 @@ function RestaurantWorkspace({
               <Power size={16} />
               {restaurant.is_active ? "Deactivate" : "Activate"}
             </button>
-            <button onClick={() => setEditing((value) => !value)} className="rounded-md bg-orange-500 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-600">
-              {editing ? "Close edit" : "Edit details"}
+            <button onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-md bg-orange-500 px-3.5 py-2 text-sm font-semibold text-white hover:bg-orange-600">
+              <Pencil size={15} />
+              Edit details
             </button>
             <button onClick={onDelete} className="inline-flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100">
               <Trash2 size={16} />
@@ -1401,40 +1488,6 @@ function RestaurantWorkspace({
         </div>
       </div>
 
-      {editing && (
-        <Panel title="Restaurant details" icon={<Store size={18} />}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Restaurant name" value={form.restaurant_name} onChange={(value) => setForm((current) => ({ ...current, restaurant_name: value }))} />
-            <Field label="Domain name" value={form.domain_name} onChange={(value) => setForm((current) => ({ ...current, domain_name: value }))} />
-            <Field label="Domain URL" value={form.domain_url ?? ""} onChange={(value) => setForm((current) => ({ ...current, domain_url: value }))} />
-            <Field label="Email" value={form.email ?? ""} onChange={(value) => setForm((current) => ({ ...current, email: value }))} />
-            <Field label="Contact" value={form.contact ?? ""} onChange={(value) => setForm((current) => ({ ...current, contact: value }))} />
-            <Field label="POS domain" value={form.pos_domain ?? ""} onChange={(value) => setForm((current) => ({ ...current, pos_domain: value }))} />
-            <Field label="Address" value={form.address} onChange={(value) => setForm((current) => ({ ...current, address: value }))} className="md:col-span-2" />
-            <Field label="Description" value={form.description ?? ""} onChange={(value) => setForm((current) => ({ ...current, description: value }))} className="md:col-span-2" />
-            <Field label="About" value={form.about ?? ""} onChange={(value) => setForm((current) => ({ ...current, about: value }))} className="md:col-span-2" />
-            <Field label="GST number" value={form.gst_number ?? ""} onChange={(value) => setForm((current) => ({ ...current, gst_number: value }))} />
-            <Field label="FSSAI number" value={form.fssai_number ?? ""} onChange={(value) => setForm((current) => ({ ...current, fssai_number: value }))} />
-            <Field label="Time zone" value={form.time_zone ?? ""} onChange={(value) => setForm((current) => ({ ...current, time_zone: value }))} />
-            <label>
-              <span className="mb-1 block text-sm font-semibold text-zinc-700">Package</span>
-              <select value={form.package} onChange={(event) => setForm((current) => ({ ...current, package: event.target.value }))} className="w-full rounded-md border border-zinc-200 px-3 py-2 outline-none focus:border-orange-500">
-                {PACKAGES.map((pkg) => (
-                  <option key={pkg} value={pkg}>
-                    {pkg}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button onClick={() => onSaveDetails(form)} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600">
-              Save restaurant
-            </button>
-          </div>
-        </Panel>
-      )}
-
       <div className="rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-100 px-4 py-3">
           <div className="flex flex-wrap gap-2">
@@ -1442,30 +1495,97 @@ function RestaurantWorkspace({
             <TabButton label="Settings" active={activeTab === "settings"} onClick={() => onTabChange("settings")} />
           </div>
         </div>
-        <div className="p-4">
+        <div className="p-4 sm:p-6">
           {activeTab === "overview" ? (
-            <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-              <div className="grid gap-4 md:grid-cols-2">
-                <InfoCard label="Domain" value={restaurant.domain_name} />
-                <InfoCard label="Domain URL" value={restaurant.domain_url || "N/A"} />
-                <InfoCard label="Package" value={restaurant.package} />
-                <InfoCard label="Email" value={restaurant.email || "N/A"} />
-                <InfoCard label="Contact" value={restaurant.contact ? String(restaurant.contact) : "N/A"} />
-                <InfoCard label="Address" value={formatAddress(restaurant.address) || "N/A"} className="md:col-span-2" />
-                <InfoCard label="Description" value={restaurant.description || "N/A"} className="md:col-span-2" />
-                <InfoCard label="About" value={restaurant.about || "N/A"} className="md:col-span-2" />
-                <InfoCard label="GST" value={restaurant.gst_number || "N/A"} />
-                <InfoCard label="FSSAI" value={restaurant.fssai_number || "N/A"} />
+            <div className="space-y-6">
+              {/* Visuals / Branding Previews */}
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-600 mb-3">
+                  Visuals & Branding
+                </h4>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-lg border border-zinc-200 bg-white p-3.5">
+                    <span className="text-xs font-semibold text-zinc-500 block mb-2">Restaurant Logo</span>
+                    {restaurant.logo_url ? (
+                      <div className="relative h-20 w-36 overflow-hidden rounded-md border border-zinc-200 bg-white">
+                        <Image src={restaurant.logo_url} alt="Logo" fill className="object-contain p-1" />
+                      </div>
+                    ) : (
+                      <div className="flex h-16 w-32 items-center justify-center rounded-md bg-zinc-100 text-xs text-zinc-400">
+                        No logo uploaded
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-zinc-200 bg-white p-3.5">
+                    <span className="text-xs font-semibold text-zinc-500 block mb-2">Background Banner</span>
+                    {restaurant.background_image_url ? (
+                      <div className="relative h-20 w-44 overflow-hidden rounded-md border border-zinc-200">
+                        <Image src={restaurant.background_image_url} alt="Banner" fill className="object-cover" />
+                      </div>
+                    ) : (
+                      <div className="flex h-16 w-32 items-center justify-center rounded-md bg-zinc-100 text-xs text-zinc-400">
+                        No background banner
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-3">
-                <InfoCard label="Services" value={restaurant.services.join(", ") || "N/A"} />
-                <InfoCard label="Cuisines" value={(restaurant.cuisines || []).join(", ") || "N/A"} />
-                <InfoCard label="POS domain" value={restaurant.pos_domain || "N/A"} />
-                <InfoCard label="Time zone" value={restaurant.time_zone || "N/A"} />
-                <InfoCard label="Created" value={formatDateTime(restaurant.created_at)} />
-                <InfoCard label="Updated" value={formatDateTime(restaurant.updated_at)} />
+              {/* Main Info Card Grid */}
+              <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <InfoCard label="Food Ordering App URL" value={restaurant.domain_url || `${restaurant.domain_name}.marinate360.com`} />
+                  <InfoCard label="POS domain" value={restaurant.pos_domain || "N/A"} />
+                  <InfoCard label="Package" value={restaurant.package} />
+                  <InfoCard label="Email" value={restaurant.email || "N/A"} />
+                  <InfoCard label="Contact" value={restaurant.contact ? String(restaurant.contact) : "N/A"} />
+                  <InfoCard label="Address" value={formatAddress(restaurant.address) || "N/A"} className="md:col-span-2" />
+                  <InfoCard label="Description" value={restaurant.description || "N/A"} className="md:col-span-2" />
+                  <InfoCard label="About" value={restaurant.about || "N/A"} className="md:col-span-2" />
+                  <InfoCard label="GST" value={restaurant.gst_number || "N/A"} />
+                  <InfoCard label="FSSAI" value={restaurant.fssai_number || "N/A"} />
+                </div>
+
+                <div className="space-y-3">
+                  <InfoCard label="Services" value={restaurant.services.join(", ") || "N/A"} />
+                  <InfoCard label="Cuisines" value={(restaurant.cuisines || []).join(", ") || "N/A"} />
+                  <InfoCard label="Time zone" value={restaurant.time_zone || "N/A"} />
+                  <InfoCard label="Created" value={formatDateTime(restaurant.created_at)} />
+                  <InfoCard label="Updated" value={formatDateTime(restaurant.updated_at)} />
+                </div>
               </div>
+
+              {/* Uploaded Documents & Certificates */}
+              {restaurant.images && restaurant.images.length > 0 && (
+                <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-600 mb-3">
+                    Uploaded Documents & Certificates ({restaurant.images.length})
+                  </h4>
+                  <div className="divide-y divide-zinc-100">
+                    {restaurant.images.map((doc) => (
+                      <div key={doc.storage_path} className="flex items-center justify-between py-2.5 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText size={16} className="text-orange-600 shrink-0" />
+                          <span className="font-medium text-zinc-800 truncate">{doc.original_name}</span>
+                          <span className="rounded bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-600">
+                            {doc.image_type}
+                          </span>
+                        </div>
+                        <a
+                          href={doc.public_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                        >
+                          <ExternalLink size={12} />
+                          Open
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-5">
@@ -1498,15 +1618,6 @@ function RestaurantWorkspace({
         </div>
       </div>
     </section>
-  );
-}
-
-function Field({ label, value, onChange, className = "" }: { label: string; value: string; onChange: (value: string) => void; className?: string }) {
-  return (
-    <label className={className}>
-      <span className="mb-1 block text-sm font-semibold text-zinc-700">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-md border border-zinc-200 px-3 py-2 outline-none focus:border-orange-500" />
-    </label>
   );
 }
 
@@ -1617,12 +1728,14 @@ function ApplicationModal({
   onClose,
   onApprove,
   onReject,
+  onDelete,
 }: {
   record: OnboardingApplication;
   processing: boolean;
   onClose: () => void;
   onApprove: () => void;
   onReject: () => void;
+  onDelete: () => void;
 }) {
   const address = record.address ?? {};
   const building = String(address.address_line_1 || address.buildingno || address.street || "");
@@ -1643,7 +1756,20 @@ function ApplicationModal({
               <h2 className="text-2xl font-semibold">{record.restaurant_name}</h2>
               <StatusBadge status={record.status} />
             </div>
-            <p className="mt-1 text-sm text-zinc-500">{record.domain_name}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-zinc-500">
+              <span>{record.domain_name}</span>
+              <span>•</span>
+              <span>Submitted: {formatDateTime(record.created_at)}</span>
+              {record.reviewed_at && (
+                <>
+                  <span>•</span>
+                  <span className={record.status === "accepted" ? "text-emerald-700 font-medium" : "text-rose-700 font-medium"}>
+                    {record.status === "accepted" ? "Accepted: " : "Rejected: "}
+                    {formatDateTime(record.reviewed_at)}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
           <button onClick={onClose} className="rounded-md p-2 hover:bg-zinc-100" aria-label="Close">
             <X size={20} />
@@ -1668,20 +1794,30 @@ function ApplicationModal({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-zinc-100 bg-zinc-50 p-4 sm:flex-row sm:justify-end">
-          <button onClick={onClose} className="rounded-md border border-zinc-200 bg-white px-4 py-2 font-semibold">
-            Close
+        <div className="flex flex-col gap-2 border-t border-zinc-100 bg-zinc-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            onClick={onDelete}
+            disabled={processing}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+          >
+            <Trash2 size={15} />
+            Delete application
           </button>
-          {record.status === "pending" ? (
-            <>
-              <button onClick={onReject} disabled={processing} className="rounded-md bg-rose-500 px-4 py-2 font-semibold text-white disabled:opacity-60">
-                Reject
-              </button>
-              <button onClick={onApprove} disabled={processing} className="rounded-md bg-emerald-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
-                {processing ? "Processing..." : "Accept and create"}
-              </button>
-            </>
-          ) : null}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button onClick={onClose} className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">
+              Close
+            </button>
+            {record.status === "pending" ? (
+              <>
+                <button onClick={onReject} disabled={processing} className="rounded-md bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600 disabled:opacity-60">
+                  Reject
+                </button>
+                <button onClick={onApprove} disabled={processing} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
+                  {processing ? "Processing..." : "Accept and create"}
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
@@ -1904,153 +2040,4 @@ function LogPagination({
   );
 }
 
-function DirectRestaurantModal({ accessToken, onClose, onCreated }: { accessToken: string; onClose: () => void; onCreated: () => void }) {
-  const [step, setStep] = useState(1);
-  const [form, setForm] = useState({
-    restaurant_name: "",
-    domain_name: "",
-    domain_url: "",
-    email: "",
-    contact: "",
-    address: "",
-    description: "",
-    about: "",
-    package: "marinate-menu",
-    cuisines: "Indian",
-    services: "dine_in,takeaway",
-    gst_number: "",
-    fssai_number: "",
-    pos_domain: "",
-    time_zone: "Asia/Kolkata",
-  });
-  const [saving, setSaving] = useState(false);
 
-  async function handleCreate() {
-    setSaving(true);
-    const result = await createRestaurantDirect(accessToken, {
-      restaurant_name: form.restaurant_name,
-      domain_name: form.domain_name || form.restaurant_name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      domain_url: form.domain_url || form.domain_name || form.restaurant_name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      email: form.email,
-      contact: form.contact,
-      address: form.address,
-      package: form.package,
-      cuisines: form.cuisines.split(",").map((item) => item.trim()).filter(Boolean),
-      services: form.services.split(",").map((item) => item.trim()).filter(Boolean),
-      description: form.description,
-      about: form.about,
-      gst_number: form.gst_number,
-      fssai_number: form.fssai_number,
-      pos_domain: form.pos_domain,
-      time_zone: form.time_zone,
-    });
-    setSaving(false);
-
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
-    }
-
-    toast.success("Restaurant created");
-    onCreated();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 p-4">
-      <div className="w-full max-w-4xl rounded-lg bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b p-5">
-          <div>
-            <h2 className="text-xl font-semibold">Create restaurant directly</h2>
-            <p className="mt-1 text-sm text-zinc-500">Use the same clean onboarding-style flow, but from the admin console.</p>
-          </div>
-          <button onClick={onClose} className="rounded-md p-2 hover:bg-zinc-100" aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="border-b border-zinc-100 px-5 py-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            {[
-              ["01", "Business"],
-              ["02", "Operations"],
-              ["03", "Compliance"],
-            ].map(([index, label], idx) => (
-              <div key={label} className={`rounded-lg border px-4 py-3 ${step === idx + 1 ? "border-orange-300 bg-orange-50" : "border-zinc-200 bg-zinc-50"}`}>
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{index}</div>
-                <div className="mt-1 font-semibold">{label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid gap-4 p-5 sm:grid-cols-2">
-          {step === 1 ? (
-            <>
-              <Field label="Restaurant name" value={form.restaurant_name} onChange={(value) => setForm((current) => ({ ...current, restaurant_name: value }))} />
-              <Field label="Domain name" value={form.domain_name} onChange={(value) => setForm((current) => ({ ...current, domain_name: value }))} />
-              <Field label="Domain URL" value={form.domain_url} onChange={(value) => setForm((current) => ({ ...current, domain_url: value }))} />
-              <Field label="Email" value={form.email} onChange={(value) => setForm((current) => ({ ...current, email: value }))} />
-              <Field label="Contact" value={form.contact} onChange={(value) => setForm((current) => ({ ...current, contact: value }))} />
-              <Field label="POS domain" value={form.pos_domain} onChange={(value) => setForm((current) => ({ ...current, pos_domain: value }))} />
-              <Field label="Description" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} className="sm:col-span-2" />
-              <Field label="About" value={form.about} onChange={(value) => setForm((current) => ({ ...current, about: value }))} className="sm:col-span-2" />
-            </>
-          ) : null}
-
-          {step === 2 ? (
-            <>
-              <Field label="Address" value={form.address} onChange={(value) => setForm((current) => ({ ...current, address: value }))} className="sm:col-span-2" />
-              <Field label="Cuisines comma separated" value={form.cuisines} onChange={(value) => setForm((current) => ({ ...current, cuisines: value }))} />
-              <Field label="Services comma separated" value={form.services} onChange={(value) => setForm((current) => ({ ...current, services: value }))} />
-              <Field label="Time zone" value={form.time_zone} onChange={(value) => setForm((current) => ({ ...current, time_zone: value }))} />
-              <label>
-                <span className="mb-1 block text-sm font-semibold text-zinc-700">Package</span>
-                <select value={form.package} onChange={(event) => setForm((current) => ({ ...current, package: event.target.value }))} className="w-full rounded-md border border-zinc-200 px-3 py-2 outline-none focus:border-orange-500">
-                  {PACKAGES.map((pkg) => (
-                    <option key={pkg} value={pkg}>
-                      {pkg}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          ) : null}
-
-          {step === 3 ? (
-            <>
-              <Field label="GST number" value={form.gst_number} onChange={(value) => setForm((current) => ({ ...current, gst_number: value }))} />
-              <Field label="FSSAI number" value={form.fssai_number} onChange={(value) => setForm((current) => ({ ...current, fssai_number: value }))} />
-              <div className="sm:col-span-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                <h3 className="font-semibold">Quick summary</h3>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <InfoCard label="Restaurant" value={form.restaurant_name || "N/A"} />
-                  <InfoCard label="Domain" value={form.domain_name || "N/A"} />
-                  <InfoCard label="Package" value={form.package || "N/A"} />
-                  <InfoCard label="Time zone" value={form.time_zone || "N/A"} />
-                </div>
-              </div>
-            </>
-          ) : null}
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-zinc-50 p-4">
-          <button onClick={onClose} className="rounded-md border border-zinc-200 bg-white px-4 py-2 font-semibold">
-            Cancel
-          </button>
-          {step > 1 ? (
-            <button onClick={() => setStep((current) => current - 1)} className="rounded-md border border-zinc-200 bg-white px-4 py-2 font-semibold">
-              Back
-            </button>
-          ) : null}
-          {step < 3 ? (
-            <button onClick={() => setStep((current) => current + 1)} className="rounded-md bg-zinc-900 px-4 py-2 font-semibold text-white">
-              Continue
-            </button>
-          ) : (
-            <button onClick={handleCreate} disabled={saving} className="rounded-md bg-orange-500 px-4 py-2 font-semibold text-white disabled:opacity-60">
-              {saving ? "Creating..." : "Create restaurant"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}

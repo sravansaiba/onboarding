@@ -87,14 +87,13 @@ function slugify(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
+    .replace(/[^a-z0-9]/g, "")
     .slice(0, 48);
 }
 
 async function getAvailableDomainName(baseName: string): Promise<string> {
   const admin = getSupabaseAdmin();
-  const base = slugify(baseName) || `restaurant-${Date.now()}`;
+  const base = slugify(baseName) || `restaurant${Date.now()}`;
   let candidate = base;
   let suffix = 1;
 
@@ -106,10 +105,10 @@ async function getAvailableDomainName(baseName: string): Promise<string> {
 
     if (!restaurant && !application) return candidate;
     suffix += 1;
-    candidate = `${base}-${suffix}`;
+    candidate = `${base}${suffix}`;
   }
 
-  return `${base}-${Date.now()}`;
+  return `${base}${Date.now()}`;
 }
 
 function parsePayload(formData: FormData) {
@@ -401,6 +400,43 @@ export async function updateMyOnboardingApplication(
 
       revalidatePath("/dashboard");
       return { ok: true, data: data as OnboardingApplication };
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete onboarding application (Super Admin only)
+// ---------------------------------------------------------------------------
+
+export async function deleteOnboardingApplication(
+  accessToken: string,
+  applicationId: string
+): Promise<ActionResult<{ id: string }>> {
+  return loggedAction(
+    { actionName: "deleteOnboardingApplication", httpMethod: "DELETE", httpPath: `/applications/${applicationId}` },
+    async (ctx) => {
+      const reviewer = await requireSuperAdmin(accessToken);
+      ctx.actorId = reviewer.id;
+
+      const admin = getSupabaseAdmin();
+      const { error } = await admin
+        .from("onboarding_applications")
+        .delete()
+        .eq("id", applicationId);
+
+      if (error) throw new Error(error.message);
+
+      void writeAuditLog({
+        source: "deleteOnboardingApplication",
+        eventType: "application.deleted",
+        actorId: reviewer.id,
+        entityType: "onboarding_application",
+        entityId: applicationId,
+        message: "Deleted onboarding application record.",
+      });
+
+      revalidatePath("/dashboard");
+      return { ok: true, data: { id: applicationId } };
     }
   );
 }

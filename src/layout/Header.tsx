@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { clearAuthSession, getAuthSession } from "@/src/lib/auth-storage";
+import { supabase } from "@/src/lib/supabase/client";
 
 interface User {
   username?: string;
@@ -88,8 +89,11 @@ export function Header() {
 
   const usernameDisplay = user?.username && user.username.trim() !== "" ? user.username : "User";
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (!window.confirm("Are you sure you want to logout?")) return;
+    try {
+      await supabase.auth.signOut();
+    } catch {}
     clearAuthSession();
     setUser({ isLoggedIn: false });
     setShowProfileDropdown(false);

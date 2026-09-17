@@ -1,6 +1,6 @@
 "use server";
 
-import { getSupabaseAdmin, requireStaffOrAdmin, type ActionResult } from "./supabase/server";
+import { getSupabaseAdmin, requireStaffOrAdmin, requireSuperAdmin, type ActionResult } from "./supabase/server";
 import { RESTAURANT_SETTING_KEYS } from "@/src/lib/constants/restaurant-settings";
 import { writeAuditLog, loggedAction } from "./app-logs";
 
@@ -40,7 +40,7 @@ export async function listRestaurantSettings(
 }
 
 // ---------------------------------------------------------------------------
-// Upsert setting
+// Upsert setting (Super Admin only)
 // ---------------------------------------------------------------------------
 
 export async function upsertRestaurantSetting(
@@ -52,7 +52,7 @@ export async function upsertRestaurantSetting(
   return loggedAction(
     { actionName: "upsertRestaurantSetting", httpMethod: "PUT", httpPath: `/restaurants/${restaurantId}/settings/${settingKey}` },
     async (ctx) => {
-      const actor = await requireStaffOrAdmin(accessToken);
+      const actor = await requireSuperAdmin(accessToken);
       ctx.actorId = actor.id;
       ctx.restaurantId = restaurantId;
 
@@ -94,7 +94,7 @@ export async function upsertRestaurantSetting(
 }
 
 // ---------------------------------------------------------------------------
-// Delete setting
+// Delete setting (Super Admin only)
 // ---------------------------------------------------------------------------
 
 export async function deleteRestaurantSetting(
@@ -105,7 +105,7 @@ export async function deleteRestaurantSetting(
   return loggedAction(
     { actionName: "deleteRestaurantSetting", httpMethod: "DELETE", httpPath: `/restaurants/${restaurantId}/settings/${settingKey}` },
     async (ctx) => {
-      const actor = await requireStaffOrAdmin(accessToken);
+      const actor = await requireSuperAdmin(accessToken);
       ctx.actorId = actor.id;
       ctx.restaurantId = restaurantId;
 

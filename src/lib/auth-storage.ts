@@ -65,14 +65,12 @@ export function getAuthSession(): {
   // Read from cookies first
   let accessToken = getCookie("accessToken");
   let userJson = getCookie("user");
-  let isLoggedIn = getCookie("isLoggedIn") === "true" || Boolean(accessToken);
 
   // Fallback check to localStorage in case of transition
   if (!accessToken && typeof window !== "undefined") {
     try {
       accessToken = localStorage.getItem("accessToken") || sessionStorage.getItem("accessToken");
       userJson = userJson || localStorage.getItem("user") || sessionStorage.getItem("user");
-      isLoggedIn = isLoggedIn || localStorage.getItem("isLoggedIn") === "true";
       if (accessToken) {
         saveAuthSession(accessToken, userJson ? JSON.parse(userJson) : null, true);
       }
@@ -88,7 +86,13 @@ export function getAuthSession(): {
     }
   }
 
-  return { accessToken, user, isLoggedIn };
+  const hasValidToken = Boolean(accessToken && accessToken.trim() !== "");
+
+  return {
+    accessToken: hasValidToken ? accessToken : null,
+    user: hasValidToken ? user : null,
+    isLoggedIn: hasValidToken,
+  };
 }
 
 export function clearAuthSession() {
@@ -101,9 +105,23 @@ export function clearAuthSession() {
     localStorage.removeItem("user");
     localStorage.removeItem("isLoggedIn");
     localStorage.removeItem("jwt");
+    if (typeof window !== "undefined") {
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+          localStorage.removeItem(key);
+        }
+      });
+    }
     sessionStorage.removeItem("accessToken");
     sessionStorage.removeItem("user");
     sessionStorage.removeItem("isLoggedIn");
     sessionStorage.removeItem("jwt");
+    if (typeof window !== "undefined") {
+      Object.keys(sessionStorage).forEach((key) => {
+        if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+          sessionStorage.removeItem(key);
+        }
+      });
+    }
   } catch {}
 }

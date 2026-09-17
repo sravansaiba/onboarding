@@ -21,10 +21,22 @@ function safeFileName(name: string): string {
     .concat(extension.toLowerCase());
 }
 
-export async function uploadRestaurantAsset(domainName: string, imageType: string, file: File): Promise<StoredAsset> {
+function resolveFolder(imageType: string): string {
+  if (imageType === "logo" || imageType === "logo_url") return "logo";
+  if (imageType === "background" || imageType === "background_image_url") return "background";
+  return "certificates";
+}
+
+export async function uploadRestaurantAsset(
+  domainName: string,
+  imageType: string,
+  file: File
+): Promise<StoredAsset> {
   const admin = getSupabaseAdmin();
+  const cleanDomain = domainName.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-");
+  const folder = resolveFolder(imageType);
   const originalName = file.name || `${imageType}.bin`;
-  const storagePath = `${domainName}/${imageType}/${Date.now()}_${safeFileName(originalName)}`;
+  const storagePath = `${cleanDomain}/${folder}/${Date.now()}_${safeFileName(originalName)}`;
   const bytes = await file.arrayBuffer();
 
   const { error } = await admin.storage.from(IMAGE_BUCKET).upload(storagePath, bytes, {
@@ -59,4 +71,50 @@ export async function insertRestaurantImageRecords(restaurantId: string, assets:
   );
 
   if (error) throw new Error(error.message);
+}
+
+export async function deleteRestaurantAsset(storagePathOrUrl?: string | null) {
+  if (!storagePathOrUrl) return;
+
+  const admin = getSupabaseAdmin();
+  let path = storagePathOrUrl.trim();
+
+  // If full Supabase URL was passed, extract the relative path inside images bucket
+  if (path.includes(`/${IMAGE_BUCKET}/`)) {
+    path = path.split(`/${IMAGE_BUCKET}/`)[1];
+  } else if (path.startsWith("http")) {
+    const parts = path.split("/");
+    path = parts.slice(parts.indexOf(IMAGE_BUCKET) + 1).join("/");
+  }
+
+  if (!path) return;
+
+  try {
+    await admin.storage.from(IMAGE_BUCKET).remove([path]);
+    await admin.from("restaurant_images").delete().eq("storage_path", path);
+  } catch (error) {
+    console.error("Error deleting asset from Supabase storage:", error);
+  }
+}
+
+export async function listRestaurantImages(restaurantId: string): Promise<StoredAsset[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("restaurant_images")
+    .select("storage_path, original_name, image_type, file_size")
+    .eq("restaurant_id", restaurantId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+
+  return data.map((item) => {
+    const { data: urlData } = admin.storage.from(IMAGE_BUCKET).getPublicUrl(item.storage_path);
+    return {
+      image_type: item.image_type,
+      storage_path: item.storage_path,
+      original_name: item.original_name,
+      file_size: item.file_size,
+      public_url: urlData.publicUrl,
+    };
+  });
 }

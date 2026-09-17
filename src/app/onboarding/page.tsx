@@ -2,10 +2,12 @@
 
 "use client";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
 import { Map as LMap, Marker as LMarker } from 'leaflet';
 import { submitOnboardingApplication } from "@/src/app/actions/onboarding-applications";
 import { supabase } from "@/src/lib/supabase/client";
+import { getAuthSession } from "@/src/lib/auth-storage";
 
 // Define types for clarity
 type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday";
@@ -426,6 +428,7 @@ interface FormDataState {
 }
 
 export default function OnboardingForm() {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<FormDataState>({
     // Step 1: Restaurant Information
@@ -479,39 +482,94 @@ export default function OnboardingForm() {
 
 
   useEffect(() => {
-    // Helper to safely get from storage
-    const getFromStorage = (key: string) =>
-      typeof window !== 'undefined' ? (sessionStorage.getItem(key) || localStorage.getItem(key)) : null;
+    async function loadUserSession() {
+      let email = "";
+      let fullname = "";
+      let hasToken = false;
 
-    let email = '';
-
-    // First, try to get email from 'user' object (JSON string)
-    const storedUser = getFromStorage('user');
-    if (storedUser) {
+      // 1. First priority: Cookie session via getAuthSession
       try {
-        const parsed = JSON.parse(storedUser);
-        if (parsed && typeof parsed === 'object' && parsed.email && typeof parsed.email === 'string') {
-          email = parsed.email.trim();
+        const session = getAuthSession();
+        if (session.isLoggedIn && session.accessToken) {
+          hasToken = true;
+        }
+        if (session.user) {
+          if (typeof session.user.email === "string" && session.user.email.trim()) {
+            email = session.user.email.trim();
+          }
+          if (typeof session.user.username === "string" && session.user.username.trim()) {
+            fullname = session.user.username.trim();
+          } else if (typeof session.user.name === "string" && session.user.name.trim()) {
+            fullname = session.user.name.trim();
+          }
         }
       } catch (e) {
-        console.warn('Failed to parse user from storage:', e);
+        console.warn("Error reading auth session:", e);
+      }
+
+      // 2. Second priority: Supabase active auth session / user
+      if (!email || !hasToken) {
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData?.user?.email) {
+            email = userData.user.email.trim();
+            fullname =
+              fullname ||
+              userData.user.user_metadata?.username ||
+              userData.user.user_metadata?.name ||
+              userData.user.user_metadata?.full_name ||
+              "";
+          }
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.access_token) {
+            hasToken = true;
+            if (!email && sessionData.session.user?.email) {
+              email = sessionData.session.user.email.trim();
+            }
+          }
+        } catch (e) {
+          console.warn("Supabase auth lookup error:", e);
+        }
+      }
+
+      // 3. Third priority: LocalStorage / SessionStorage fallbacks
+      if (!email && typeof window !== "undefined") {
+        try {
+          const storedUser = sessionStorage.getItem("user") || localStorage.getItem("user");
+          if (storedUser) {
+            const parsed = JSON.parse(storedUser);
+            if (parsed?.email) email = parsed.email.trim();
+            if (parsed?.username || parsed?.name) fullname = fullname || parsed.username || parsed.name;
+          }
+          if (!email) {
+            const directEmail = sessionStorage.getItem("email") || localStorage.getItem("email");
+            if (directEmail) email = directEmail.trim();
+          }
+        } catch (e) {
+          console.warn("Storage fallback error:", e);
+        }
+      }
+
+      // If user is not signed in, redirect to login
+      if (!hasToken && !email) {
+        toast.error("Please sign in to register your restaurant");
+        router.push("/login");
+        return;
+      }
+
+      // Prefill only if valid email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (email && emailRegex.test(email)) {
+        setFormData((prev) => ({
+          ...prev,
+          email,
+          ...(fullname && !prev.fullname ? { fullname } : {}),
+        }));
       }
     }
 
-    // Fallback: check if 'email' is stored directly
-    if (!email) {
-      const directEmail = getFromStorage('email');
-      if (directEmail) {
-        email = directEmail.trim();
-      }
-    }
-
-    // Prefill only if valid email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (email && emailRegex.test(email)) {
-      setFormData((prev) => ({ ...prev, email }));
-    }
-  }, []);
+    loadUserSession();
+  }, [router]);
   const [errors, setErrors] = useState<ErrorMap>({});
   const [previewImages, setPreviewImages] = useState({
     logo_url: null,
