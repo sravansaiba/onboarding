@@ -38,6 +38,7 @@ export default function EditRestaurantModal({
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
+  const [docToDelete, setDocToDelete] = useState<string | null>(null);
 
   // Editable fields
   const [restaurantName, setRestaurantName] = useState(restaurant.restaurant_name || "");
@@ -105,14 +106,18 @@ export default function EditRestaurantModal({
     }
   };
 
-  async function handleDeleteDocument(storagePath: string) {
-    if (!confirm("Are you sure you want to delete this document from Supabase storage?")) return;
+  function triggerDeleteDocument(storagePath: string) {
+    setDocToDelete(storagePath);
+  }
+
+  async function executeDeleteDocument(storagePath: string) {
     setDeletingPath(storagePath);
     try {
       const res = await deleteRestaurantDocument(accessToken, restaurant.id, storagePath);
       if (res.ok) {
         setExistingImages((prev) => prev.filter((img) => img.storage_path !== storagePath));
         toast.success("Document removed from storage.");
+        setDocToDelete(null);
       } else {
         toast.error(res.error || "Failed to delete document.");
       }
@@ -435,7 +440,7 @@ export default function EditRestaurantModal({
                           <button
                             type="button"
                             disabled={deletingPath === doc.storage_path}
-                            onClick={() => handleDeleteDocument(doc.storage_path)}
+                            onClick={() => triggerDeleteDocument(doc.storage_path)}
                             className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                           >
                             <Trash2 size={12} />
@@ -469,6 +474,43 @@ export default function EditRestaurantModal({
           </div>
         </form>
       </div>
+
+      {/* Delete Document Confirmation Modal */}
+      {docToDelete && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Delete Document?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Permanently delete this verification document from storage? This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={Boolean(deletingPath)}
+                onClick={() => setDocToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deletingPath)}
+                onClick={() => executeDeleteDocument(docToDelete)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition disabled:opacity-50"
+              >
+                {deletingPath ? "Deleting..." : "Delete Document"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -97,6 +97,12 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState("");
+  const [appToApprove, setAppToApprove] = useState<OnboardingApplication | null>(null);
+  const [appToReject, setAppToReject] = useState<OnboardingApplication | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [appToDelete, setAppToDelete] = useState<OnboardingApplication | null>(null);
+  const [restaurantToDelete, setRestaurantToDelete] = useState<RestaurantRecord | null>(null);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
   const refreshDashboard = useCallback(async () => {
@@ -246,8 +252,11 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     return PACKAGES.map((pkg) => ({ key: pkg, value: counts.get(pkg) ?? 0 }));
   }, [restaurants]);
 
-  async function handleApprove(record: OnboardingApplication) {
-    if (!confirm(`Accept ${record.restaurant_name} and create the restaurant?`)) return;
+  function handleApprove(record: OnboardingApplication) {
+    setAppToApprove(record);
+  }
+
+  async function executeApprove(record: OnboardingApplication) {
     setProcessingId(record.id);
     const result = await approveOnboardingApplication(accessToken, record.id);
     setProcessingId("");
@@ -258,18 +267,21 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     }
 
     toast.success("Restaurant accepted, created, and owner promoted to admin");
+    setAppToApprove(null);
     setSelectedRecord(null);
     setActiveView("restaurants");
     await refreshDashboard();
     setSelectedRestaurantId(result.data.restaurantId);
   }
 
-  async function handleReject(record: OnboardingApplication) {
-    const notes = window.prompt("Reason for rejection", "Documents need review.");
-    if (notes === null) return;
+  function handleReject(record: OnboardingApplication) {
+    setAppToReject(record);
+    setRejectReason("Documents need review.");
+  }
 
+  async function executeReject(record: OnboardingApplication) {
     setProcessingId(record.id);
-    const result = await rejectOnboardingApplication(accessToken, record.id, notes);
+    const result = await rejectOnboardingApplication(accessToken, record.id, rejectReason);
     setProcessingId("");
 
     if (!result.ok) {
@@ -278,12 +290,16 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     }
 
     toast.success("Application rejected");
+    setAppToReject(null);
     setSelectedRecord(null);
     await refreshDashboard();
   }
 
-  async function handleDeleteApplication(record: OnboardingApplication) {
-    if (!confirm(`Permanently delete the application for "${record.restaurant_name}"? This will remove it from the queue.`)) return;
+  function handleDeleteApplication(record: OnboardingApplication) {
+    setAppToDelete(record);
+  }
+
+  async function executeDeleteApplication(record: OnboardingApplication) {
     setProcessingId(record.id);
     const result = await deleteOnboardingApplication(accessToken, record.id);
     setProcessingId("");
@@ -294,6 +310,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     }
 
     toast.success("Application deleted from queue");
+    setAppToDelete(null);
     setSelectedRecord(null);
     await refreshDashboard();
   }
@@ -310,23 +327,28 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     await refreshDashboard();
   }
 
-  async function handleDeleteRestaurant() {
+  function handleDeleteRestaurant() {
     if (!selectedRestaurant) return;
-    if (!confirm(`Delete ${selectedRestaurant.restaurant_name}? This removes the restaurant and related settings.`)) return;
-    const result = await deleteRestaurantRecord(accessToken, selectedRestaurant.id);
+    setRestaurantToDelete(selectedRestaurant);
+  }
+
+  async function executeDeleteRestaurant(restaurant: RestaurantRecord) {
+    setProcessingId(restaurant.id);
+    const result = await deleteRestaurantRecord(accessToken, restaurant.id);
+    setProcessingId("");
     if (!result.ok) {
       toast.error(result.error);
       return;
     }
     toast.success("Restaurant deleted");
+    setRestaurantToDelete(null);
     setSelectedRestaurantId("");
     setSelectedRestaurant(null);
     await refreshDashboard();
   }
 
   function handleLogoutRequest() {
-    if (!confirm("Are you sure you want to logout?")) return;
-    onLogout();
+    setShowLogoutModal(true);
   }
 
   async function handleAddSetting(definition: RestaurantSettingDefinition) {
@@ -369,7 +391,16 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
         <aside className="hidden w-72 shrink-0 border-r border-zinc-200 bg-white lg:block">
           <div className="sticky top-0 flex h-screen flex-col">
             <div className="border-b border-zinc-100 px-5 py-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Marinate360</p>
+              <div className="flex items-center gap-2.5">
+                <Image
+                  src="/logo/m360logo.png"
+                  alt="Marinate360"
+                  width={28}
+                  height={28}
+                  className="h-7 w-auto object-contain"
+                />
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Marinate360</p>
+              </div>
               <h1 className="mt-2 text-xl font-semibold tracking-tight">Super Admin</h1>
               <p className="mt-1 text-sm text-zinc-500">{profile.email}</p>
             </div>
@@ -398,7 +429,10 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
             <div className="flex flex-col gap-3 px-4 py-4 sm:px-6 xl:px-8">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-600">Control panel</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-600 flex items-center gap-1.5">
+                    {/* <Image src="/logo/m360logo.png" alt="Marinate360" width={18} height={18} className="h-4.5 w-auto object-contain inline-block" /> */}
+                    Control panel
+                  </p>
                   <h2 className="mt-1 text-2xl font-semibold tracking-tight">{viewTitle(activeView)}</h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -588,6 +622,201 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
             await refreshDashboard();
           }}
         />
+      )}
+      {/* Modal: Approve Application Confirmation */}
+      {appToApprove && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Approve Application?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Accept <span className="font-semibold text-zinc-900">{appToApprove.restaurant_name}</span> and generate live restaurant credentials? The applicant (<span className="font-semibold">{appToApprove.email}</span>) will be granted admin access to this outlet.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => setAppToApprove(null)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => executeApprove(appToApprove)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition disabled:opacity-50"
+              >
+                {processingId === appToApprove.id ? "Approving..." : "Accept & Create Restaurant"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Reject Application with Reason */}
+      {appToReject && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <XCircle size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Reject Application</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Provide feedback or reason for rejecting <span className="font-semibold text-zinc-900">{appToReject.restaurant_name}</span>.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-zinc-700">Rejection Reason</label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. Incomplete GST documents, invalid address..."
+                rows={3}
+                className="w-full text-xs p-3 rounded-xl border border-zinc-300 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => setAppToReject(null)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(processingId) || !rejectReason.trim()}
+                onClick={() => executeReject(appToReject)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition disabled:opacity-50"
+              >
+                {processingId === appToReject.id ? "Rejecting..." : "Reject Application"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Delete Application */}
+      {appToDelete && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Delete Application?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Permanently delete the registration record for <span className="font-semibold text-zinc-900">{appToDelete.restaurant_name}</span>? This will permanently remove it from the onboarding queue.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => setAppToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => executeDeleteApplication(appToDelete)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition disabled:opacity-50"
+              >
+                {processingId === appToDelete.id ? "Deleting..." : "Delete Application"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Delete Restaurant */}
+      {restaurantToDelete && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Delete Restaurant?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Permanently delete <span className="font-semibold text-zinc-900">{restaurantToDelete.restaurant_name}</span>? All menu items, tables, orders, and configurations associated with this outlet will be permanently deleted. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => setRestaurantToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(processingId)}
+                onClick={() => executeDeleteRestaurant(restaurantToDelete)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition disabled:opacity-50"
+              >
+                {processingId === restaurantToDelete.id ? "Deleting..." : "Delete Restaurant"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Logout Confirmation */}
+      {showLogoutModal && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <LogOut size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Sign out of Super Admin?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Are you sure you want to end your Super Admin session for <span className="font-semibold">{profile.email}</span>?
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  onLogout();
+                }}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );
@@ -1209,6 +1438,7 @@ function RestaurantLogsWorkspace({
   onRefresh: () => void;
 }) {
   const [purging, setPurging] = useState(false);
+  const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
   const totalLogPages = Math.max(1, Math.ceil(logs.length / LOGS_PER_PAGE));
   const paginatedLogs = logs.slice((logPage - 1) * LOGS_PER_PAGE, logPage * LOGS_PER_PAGE);
 
@@ -1224,11 +1454,11 @@ function RestaurantLogsWorkspace({
         )
       : null;
 
-  async function handlePurgeOldLogs() {
-    if (!confirm("Are you sure you want to delete all logs older than 7 days? This action cannot be undone.")) return;
+  async function executePurge() {
     setPurging(true);
     const res = await purgeOldAppLogs(accessToken, 7);
     setPurging(false);
+    setShowPurgeConfirm(false);
     if (res.ok) {
       toast.success(`Purged ${res.data.deletedCount} log records older than 7 days.`);
       onRefresh();
@@ -1261,7 +1491,7 @@ function RestaurantLogsWorkspace({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={handlePurgeOldLogs}
+              onClick={() => setShowPurgeConfirm(true)}
               disabled={purging}
               className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
               title="Delete logs older than 7 days"
@@ -1421,6 +1651,43 @@ function RestaurantLogsWorkspace({
             <LogPagination page={logPage} totalPages={totalLogPages} totalRecords={logs.length} setPage={setLogPage} />
           </section>
         </>
+      )}
+
+      {/* Modal: Purge Logs Confirmation */}
+      {showPurgeConfirm && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Purge Old Logs?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Permanently delete all audit and API logs older than 7 days? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={purging}
+                onClick={() => setShowPurgeConfirm(false)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={purging}
+                onClick={executePurge}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition disabled:opacity-50"
+              >
+                {purging ? "Purging..." : "Purge Logs"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

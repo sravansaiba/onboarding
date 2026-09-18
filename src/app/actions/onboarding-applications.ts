@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { uploadRestaurantAsset, type StoredAsset } from "./restaurant-images";
@@ -124,7 +124,7 @@ function getFile(formData: FormData, key: string): File | null {
 }
 
 // ---------------------------------------------------------------------------
-// Submit onboarding application (public — no auth required)
+// Submit onboarding application (public â€” no auth required)
 // ---------------------------------------------------------------------------
 
 export async function submitOnboardingApplication(formData: FormData): Promise<ActionResult<{ id: string }>> {
@@ -258,7 +258,7 @@ export async function submitOnboardingApplication(formData: FormData): Promise<A
 }
 
 // ---------------------------------------------------------------------------
-// List applications (read — only errors logged)
+// List applications (read â€” only errors logged)
 // ---------------------------------------------------------------------------
 
 export async function listOnboardingApplications(options: ListOptions): Promise<
@@ -307,7 +307,7 @@ export async function listOnboardingApplications(options: ListOptions): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// Get my application (read — only errors logged)
+// Get my application (read â€” only errors logged)
 // ---------------------------------------------------------------------------
 
 export async function getMyOnboardingApplication(accessToken: string): Promise<ActionResult<OnboardingApplication | null>> {
@@ -357,9 +357,14 @@ export async function updateMyOnboardingApplication(
       if (existingError) throw new Error(existingError.message);
       if (!existing) throw new Error("Application not found.");
       if (existing.status !== "pending") throw new Error("Accepted or rejected applications cannot be edited.");
-      if (existing.submitted_by !== user.id && existing.email !== user.email) {
-        throw new Error("You can only edit your own application.");
-      }
+      const isOwner =
+      (existing.submitted_by && existing.submitted_by === user.id) ||
+      (existing.email && user.email && existing.email.trim().toLowerCase() === user.email.trim().toLowerCase()) ||
+      (user.role === "super_admin");
+
+    if (!isOwner) {
+      throw new Error("You can only edit your own application.");
+    }
 
       const allowedPatch = {
         restaurant_name: patch.restaurant_name,
@@ -439,4 +444,143 @@ export async function deleteOnboardingApplication(
       return { ok: true, data: { id: applicationId } };
     }
   );
+}
+
+
+export async function getMyOnboardingApplications(accessToken: string): Promise<ActionResult<OnboardingApplication[]>> {
+  return loggedAction(
+    { actionName: "getMyOnboardingApplications", httpMethod: "GET", httpPath: "/applications/mine/all" },
+    async (ctx) => {
+      const user = await getUserFromAccessToken(accessToken);
+      ctx.actorId = user.id;
+
+      const admin = getSupabaseAdmin();
+      const { data, error } = await admin
+        .from("onboarding_applications")
+        .select("*")
+        .or(`submitted_by.eq.${user.id},email.eq.${user.email}`)
+        .order("created_at", { ascending: false });
+
+      if (error) throw new Error(error.message);
+      return { ok: true, data: (data || []) as OnboardingApplication[] };
+    }
+  );
+}
+// ---------------------------------------------------------------------------
+// Update my application with FormData (supports document replacement)
+// ---------------------------------------------------------------------------
+
+export async function updateMyOnboardingApplicationWithFormData(
+  formData: FormData
+): Promise<ActionResult<OnboardingApplication>> {
+  const start = Date.now();
+  let userForLog: { id: string; email: string | null } | null = null;
+
+  try {
+    const accessToken = String(formData.get("accessToken") || "");
+    const applicationId = String(formData.get("applicationId") || "");
+    const payloadStr = String(formData.get("payload") || "{}");
+    const patch = JSON.parse(payloadStr) as Partial<OnboardingApplication>;
+
+    const user = await getUserFromAccessToken(accessToken);
+    userForLog = user;
+    const admin = getSupabaseAdmin();
+
+    const { data: existing, error: existingError } = await admin
+      .from("onboarding_applications")
+      .select("*")
+      .eq("id", applicationId)
+      .maybeSingle();
+
+    if (existingError) throw new Error(existingError.message);
+    if (!existing) throw new Error("Application not found.");
+    if (existing.status !== "pending") throw new Error("Accepted or rejected applications cannot be edited.");
+    const isOwner =
+      (existing.submitted_by && existing.submitted_by === user.id) ||
+      (existing.email && user.email && existing.email.trim().toLowerCase() === user.email.trim().toLowerCase()) ||
+      (user.role === "super_admin");
+
+    if (!isOwner) {
+      throw new Error("You can only edit your own application.");
+    }
+
+    const domainName = existing.domain_name;
+    const currentImages = { ...((existing.images || {}) as Record<string, StoredAsset>) };
+    const currentDocuments = { ...((existing.documents || {}) as Record<string, StoredAsset>) };
+
+    // Handle document removals
+    const removeKeysStr = String(formData.get("remove_keys") || "[]");
+    try {
+      const removeKeys = JSON.parse(removeKeysStr) as string[];
+      for (const key of removeKeys) {
+        delete currentImages[key];
+        delete currentDocuments[key];
+      }
+    } catch {
+      // ignore
+    }
+
+    // Handle newly uploaded files
+    const assetEntries: Array<[string, string]> = [
+      ["logo_url", "logo"],
+      ["background_image_url", "background"],
+      ["pan_card", "certificates"],
+      ["gst_certificate", "certificates"],
+      ["fssai_license", "certificates"],
+    ];
+
+    for (const [formKey, imageType] of assetEntries) {
+      const file = formData.get(formKey);
+      if (file instanceof File && file.size > 0) {
+        const stored = await uploadRestaurantAsset(domainName, imageType, file);
+        if (["logo_url", "background_image_url"].includes(formKey)) {
+          currentImages[formKey] = stored;
+        } else {
+          currentDocuments[formKey] = stored;
+        }
+      }
+    }
+
+    const allowedPatch = {
+      restaurant_name: patch.restaurant_name ?? existing.restaurant_name,
+      owner_name: patch.owner_name ?? existing.owner_name,
+      phone: patch.phone ?? existing.phone,
+      restaurant_primary_contact: patch.restaurant_primary_contact ?? existing.restaurant_primary_contact,
+      address: patch.address ?? existing.address,
+      legal: patch.legal ?? existing.legal,
+      bank: patch.bank ?? existing.bank,
+      cuisines: patch.cuisines ?? existing.cuisines,
+      services: patch.services ?? existing.services,
+      timings: patch.timings ?? existing.timings,
+      delivery_timings: patch.delivery_timings !== undefined ? patch.delivery_timings : existing.delivery_timings,
+      takeaway_timings: patch.takeaway_timings !== undefined ? patch.takeaway_timings : existing.takeaway_timings,
+      images: currentImages,
+      documents: currentDocuments,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await admin
+      .from("onboarding_applications")
+      .update(allowedPatch)
+      .eq("id", applicationId)
+      .select("*")
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    void writeAuditLog({
+      source: "updateMyOnboardingApplicationWithFormData",
+      eventType: "onboarding.updated",
+      actorId: user.id,
+      entityType: "onboarding_application",
+      entityId: applicationId,
+      message: `Updated pending onboarding application and assets for ${allowedPatch.restaurant_name}.`,
+      metadata: { duration_ms: Date.now() - start },
+    });
+
+    revalidatePath("/dashboard");
+    return { ok: true, data: data as OnboardingApplication };
+  } catch (error) {
+    return toActionError(error);
+  }
 }

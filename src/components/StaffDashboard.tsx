@@ -56,6 +56,7 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
   const [selectedRestaurantId, setSelectedRestaurantId] = useState("");
   const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantRecord | null>(null);
   const [restaurantPanelTab, setRestaurantPanelTab] = useState<RestaurantPanelTab>("overview");
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [settings, setSettings] = useState<RestaurantSetting[]>([]);
   const [restaurantSearch, setRestaurantSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -128,8 +129,7 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
   }, [restaurants]);
 
   function handleLogoutRequest() {
-    if (!confirm("Are you sure you want to logout?")) return;
-    onLogout();
+    setShowLogoutModal(true);
   }
 
   return (
@@ -141,6 +141,7 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
           <div className="sticky top-0 flex h-screen flex-col">
             <div className="border-b border-zinc-100 px-5 py-5">
               <div className="flex items-center gap-2">
+                <Image src="/logo/m360logo.png" alt="Marinate360" width={24} height={24} className="h-6 w-auto object-contain" />
                 <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-700">STAFF</span>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Marinate360</p>
               </div>
@@ -483,6 +484,43 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
             await fetchRestaurants();
           }}
         />
+      )}
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <LogOut size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Sign out of Staff Portal?</h3>
+                <p className="text-xs text-zinc-600 mt-1 leading-relaxed">
+                  Are you sure you want to end your staff session for <span className="font-semibold">{profile.email}</span>?
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-100">
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  onLogout();
+                }}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

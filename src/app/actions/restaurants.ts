@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -10,6 +10,7 @@ import {
 } from "./restaurant-images";
 import {
   getSupabaseAdmin,
+  getUserFromAccessToken,
   requireSuperAdmin,
   requireStaffOrAdmin,
   type ActionResult,
@@ -41,6 +42,7 @@ export type RestaurantRecord = {
   logo_url: string | null;
   background_image_url: string | null;
   pos_domain: string | null;
+  theme?: string | null;
   time_zone: string;
   updated_at: string;
   created_at: string;
@@ -62,6 +64,7 @@ export type DirectRestaurantInput = {
   gst_number?: string;
   fssai_number?: string;
   pos_domain?: string;
+  theme?: string;
   time_zone?: string;
 };
 
@@ -80,6 +83,7 @@ export type UpdateRestaurantInput = {
   gst_number?: string;
   fssai_number?: string;
   pos_domain?: string;
+  theme?: string;
   time_zone?: string;
 };
 
@@ -156,7 +160,7 @@ async function checkUrlCollisions(
 }
 
 // ---------------------------------------------------------------------------
-// Approve onboarding → create restaurant
+// Approve onboarding Ã¢â€ â€™ create restaurant
 // ---------------------------------------------------------------------------
 
 export async function approveOnboardingApplication(
@@ -226,10 +230,25 @@ export async function approveOnboardingApplication(
       await insertRestaurantImageRecords(restaurant.id, allAssets);
 
       if (app.submitted_by) {
+        const { data: currentProfile } = await admin
+          .from("profiles")
+          .select("restaurant_id, restaurant_ids")
+          .eq("id", app.submitted_by)
+          .single();
+
+        const existingIds = Array.isArray(currentProfile?.restaurant_ids)
+          ? currentProfile.restaurant_ids
+          : currentProfile?.restaurant_id
+          ? [currentProfile.restaurant_id]
+          : [];
+
+        const updatedIds = Array.from(new Set([...existingIds, restaurant.id]));
+
         const { error: profileError } = await admin
           .from("profiles")
           .update({
-            restaurant_id: restaurant.id,
+            restaurant_id: currentProfile?.restaurant_id || restaurant.id,
+            restaurant_ids: updatedIds,
             role: "admin",
             updated_at: new Date().toISOString(),
           })
@@ -586,11 +605,15 @@ export async function updateRestaurantWithFormData(
         ? payload.services
         : getServicesForPackage(payload.package || existing.package);
 
+      const isSuperAdmin = actor.role === "super_admin";
+      const domainUrlToSave = isSuperAdmin && payload.domain_url ? payload.domain_url.trim() : existing.domain_url;
+      const posDomainToSave = isSuperAdmin && payload.pos_domain ? payload.pos_domain.trim() : existing.pos_domain;
+
       const { data, error } = await admin
         .from("restaurants")
         .update({
           restaurant_name: payload.restaurant_name.trim(),
-          domain_url: payload.domain_url || existing.domain_url,
+          domain_url: domainUrlToSave,
           email: payload.email ? payload.email.trim() : null,
           contact: numericContact(payload.contact),
           address: formatAddress(payload.address),
@@ -603,6 +626,7 @@ export async function updateRestaurantWithFormData(
           fssai_number: payload.fssai_number || null,
           pos_domain: payload.pos_domain || existing.pos_domain,
           time_zone: payload.time_zone || existing.time_zone || "Asia/Kolkata",
+          theme: payload.theme || existing.theme || "light",
           logo_url: newLogoUrl,
           background_image_url: newBackgroundUrl,
           updated_at: new Date().toISOString(),
@@ -775,3 +799,55 @@ export async function deleteRestaurantRecord(
     }
   );
 }
+
+
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Get restaurants belonging to the authenticated user/owner
+// ---------------------------------------------------------------------------
+
+export async function getMyRestaurants(
+  accessToken: string
+): Promise<ActionResult<RestaurantRecord[]>> {
+  return loggedAction(
+    { actionName: "getMyRestaurants", httpMethod: "GET", httpPath: "/restaurants/mine" },
+    async (ctx) => {
+      const user = await getUserFromAccessToken(accessToken);
+      ctx.actorId = user.id;
+
+      const admin = getSupabaseAdmin();
+      const { data: profile } = await admin.from("profiles").select("restaurant_id, restaurant_ids, role").eq("id", user.id).single();
+
+      const { data: apps } = await admin
+        .from("onboarding_applications")
+        .select("domain_name, restaurant_id")
+        .or(`submitted_by.eq.${user.id},email.eq.${user.email}`);
+
+      const domainNames = (apps || []).map((a: { domain_name?: string }) => a.domain_name).filter(Boolean);
+      const appRestIds = (apps || []).map((a: { restaurant_id?: string }) => a.restaurant_id).filter(Boolean) as string[];
+      const profileRestIds = Array.isArray(profile?.restaurant_ids) ? [...profile.restaurant_ids] : [];
+      if (profile?.restaurant_id && !profileRestIds.includes(profile.restaurant_id)) {
+        profileRestIds.push(profile.restaurant_id);
+      }
+
+      const allTargetIds = Array.from(new Set([...appRestIds, ...profileRestIds]));
+
+      let query = admin.from("restaurants").select("*");
+      const orConditions = [`email.eq.${user.email}`];
+      if (allTargetIds.length > 0) {
+        orConditions.push(`id.in.(${allTargetIds.join(",")})`);
+      }
+      if (domainNames.length > 0) {
+        orConditions.push(`domain_name.in.(${domainNames.join(",")})`);
+      }
+      query = query.or(orConditions.join(","));
+
+      const { data, error } = await query.order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      return { ok: true, data: (data || []) as RestaurantRecord[] };
+    }
+  );
+}
+
+

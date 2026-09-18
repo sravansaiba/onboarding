@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, LogIn, Menu, UserRound, X } from "lucide-react";
+import { LayoutDashboard, LogIn, LogOut, Menu, UserRound, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +17,7 @@ interface User {
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [user, setUser] = useState<{
     username?: string;
     isLoggedIn?: boolean;
@@ -89,8 +90,12 @@ export function Header() {
 
   const usernameDisplay = user?.username && user.username.trim() !== "" ? user.username : "User";
 
+  const triggerLogout = () => {
+    setShowLogoutConfirm(true);
+  };
+
   const handleLogout = async () => {
-    if (!window.confirm("Are you sure you want to logout?")) return;
+    setShowLogoutConfirm(false);
     try {
       await supabase.auth.signOut();
     } catch {}
@@ -141,7 +146,7 @@ export function Header() {
                       <LayoutDashboard size={16} />
                       Dashboard
                     </Link>
-                    <button onClick={handleLogout} className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-zinc-700 hover:bg-rose-50 hover:text-rose-700">
+                    <button onClick={triggerLogout} className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-zinc-700 hover:bg-rose-50 hover:text-rose-700">
                       <UserRound size={16} />
                       Sign out
                     </button>
@@ -189,7 +194,7 @@ export function Header() {
                   <Link href="/dashboard" onClick={() => setIsMenuOpen(false)} className="block rounded-lg bg-orange-500 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-orange-600">
                     Open dashboard
                   </Link>
-                  <button onClick={handleLogout} className="block w-full rounded-lg px-4 py-3 text-left text-sm font-semibold text-rose-200 hover:bg-rose-500/10">
+                  <button onClick={triggerLogout} className="block w-full rounded-lg px-4 py-3 text-left text-sm font-semibold text-rose-200 hover:bg-rose-500/10">
                     Sign out
                   </button>
                 </>
@@ -202,6 +207,40 @@ export function Header() {
           </div>
         </div>
       ) : null}
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-zinc-900 text-zinc-100 p-6 shadow-2xl border border-zinc-800 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0">
+                <LogOut size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Sign out of Marinate360?</h3>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  Are you sure you want to log out of your account?
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                className="px-4 py-2 text-xs font-semibold text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
