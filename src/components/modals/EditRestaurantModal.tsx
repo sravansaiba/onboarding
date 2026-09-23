@@ -48,6 +48,7 @@ export default function EditRestaurantModal({
   const [contact, setContact] = useState(restaurant.contact ? String(restaurant.contact) : "");
   const [address, setAddress] = useState(formatAddress(restaurant.address));
   const [selectedPackage, setSelectedPackage] = useState(restaurant.package || "marinate-menu");
+  const [customCuisineInput, setCustomCuisineInput] = useState("");
   const [selectedCuisines, setSelectedCuisines] = useState<string[]>(
     restaurant.cuisines && restaurant.cuisines.length > 0 ? restaurant.cuisines : ["North Indian"]
   );
@@ -80,6 +81,18 @@ export default function EditRestaurantModal({
     } else {
       setSelectedCuisines([...selectedCuisines, cuisine]);
     }
+  };
+
+  const addCustomCuisine = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = customCuisineInput.trim();
+    if (!trimmed) return;
+    if (selectedCuisines.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      toast.error("Cuisine already added.");
+      return;
+    }
+    setSelectedCuisines([...selectedCuisines, trimmed]);
+    setCustomCuisineInput("");
   };
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -298,9 +311,12 @@ export default function EditRestaurantModal({
 
           {/* Cuisines */}
           <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider text-orange-600 mb-2">
-              Cuisines
-            </h4>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-bold uppercase tracking-wider text-orange-600">
+                Cuisines ({selectedCuisines.length} selected)
+              </h4>
+              <span className="text-xs text-zinc-400">Click to toggle or add custom below</span>
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {CUISINES.map((c) => {
                 const active = selectedCuisines.includes(c);
@@ -320,6 +336,50 @@ export default function EditRestaurantModal({
                   </button>
                 );
               })}
+
+              {/* Render custom cuisines not in CUISINES */}
+              {selectedCuisines
+                .filter((c) => !CUISINES.includes(c as any))
+                .map((custom) => (
+                  <span
+                    key={custom}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-orange-600 text-white px-3 py-1 text-xs font-semibold shadow-xs"
+                  >
+                    <Check size={11} />
+                    <span>{custom}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleCuisine(custom as any)}
+                      className="hover:text-zinc-200 ml-0.5"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+            </div>
+
+            {/* Custom Cuisine Input */}
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Add custom cuisine (e.g. Arabian Mandi, Mughlai, Bakery)..."
+                value={customCuisineInput}
+                onChange={(e) => setCustomCuisineInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomCuisine();
+                  }
+                }}
+                className="flex-1 rounded-lg border border-zinc-200 bg-white px-3.5 py-1.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-orange-500 focus:outline-hidden"
+              />
+              <button
+                type="button"
+                onClick={() => addCustomCuisine()}
+                className="rounded-lg bg-orange-500 hover:bg-orange-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs transition"
+              >
+                Add
+              </button>
             </div>
           </div>
 

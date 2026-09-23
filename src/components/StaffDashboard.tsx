@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import Image from "next/image";
@@ -8,7 +10,10 @@ import {
   BarChart3,
   Building2,
   CheckCircle2,
+  ChevronDown,
+  KeyRound,
   ChevronRight,
+  Clock,
   ExternalLink,
   FileText,
   Image as ImageIcon,
@@ -20,7 +25,15 @@ import {
   RefreshCw,
   Search,
   Sliders,
+  Settings as SettingsIcon,
   Store,
+  User,
+  ShieldCheck,
+  TrendingUp,
+  Award,
+  Sparkles,
+  UserCheck,
+  Users,
   X,
   XCircle,
 } from "lucide-react";
@@ -36,8 +49,10 @@ import {
 import type { AppProfile } from "@/src/app/actions/profiles";
 import { RESTAURANT_SETTING_DEFINITIONS, type RestaurantSettingDefinition } from "@/src/lib/constants/restaurant-settings";
 import { formatAddress } from "@/src/lib/utils/address";
-import CreateRestaurantModal from "@/src/components/modals/CreateRestaurantModal";
+import SelectPackageModal from "@/src/components/modals/SelectPackageModal";
+import UsersManagementView from "@/src/components/admin/UsersManagementView";
 import EditRestaurantModal from "@/src/components/modals/EditRestaurantModal";
+import AccountSettingsView from "@/src/components/admin/AccountSettingsView";
 
 type Props = {
   accessToken: string;
@@ -45,12 +60,15 @@ type Props = {
   onLogout: () => void;
 };
 
-type StaffView = "overview" | "restaurants";
+type StaffView = "overview" | "restaurants" | "users" | "settings";
 type RestaurantPanelTab = "overview" | "settings";
 
 const PACKAGES = ["marinate-menu", "marinate-dinein", "marinate360", "marinate-foodtruck"];
 
 export default function StaffDashboard({ accessToken, profile, onLogout }: Props) {
+  const [currentProfile, setCurrentProfile] = useState<AppProfile>(profile);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const router = useRouter();
   const [activeView, setActiveView] = useState<StaffView>("overview");
   const [restaurants, setRestaurants] = useState<RestaurantRecord[]>([]);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState("");
@@ -59,9 +77,14 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [settings, setSettings] = useState<RestaurantSetting[]>([]);
   const [restaurantSearch, setRestaurantSearch] = useState("");
+  const [restaurantFilter, setRestaurantFilter] = useState<"all" | "my">("all");
+  const [packageScope, setPackageScope] = useState<"all" | "my">("all");
+  const [quickDirectoryScope, setQuickDirectoryScope] = useState<"all" | "my">("all");
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingRestaurant, setEditingRestaurant] = useState<RestaurantRecord | null>(null);
+  const [restaurantPage, setRestaurantPage] = useState(1);
+  const [restaurantPageSize, setRestaurantPageSize] = useState(10);
 
   const fetchRestaurants = useCallback(async () => {
     setLoading(true);
@@ -113,20 +136,60 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
     loadRestaurantSettings(selectedRestaurantId);
   }, [loadRestaurantSettings, loadSelectedRestaurantDetails, selectedRestaurantId]);
 
+  const myRestaurants = useMemo(() => {
+    return restaurants.filter((r) => r.created_by === currentProfile.id);
+  }, [restaurants, currentProfile.id]);
+
+  useEffect(() => {
+    setRestaurantPage(1);
+  }, [restaurantSearch, restaurantFilter]);
+
+  const filteredRestaurants = useMemo(() => {
+    return filterRestaurants(restaurants, restaurantSearch).filter(
+      (r) => restaurantFilter === "all" || r.created_by === currentProfile.id
+    );
+  }, [restaurants, restaurantSearch, restaurantFilter, currentProfile.id]);
+
+  const totalRestaurantPages = Math.max(1, Math.ceil(filteredRestaurants.length / restaurantPageSize));
+  const paginatedRestaurants = useMemo(() => {
+    const start = (restaurantPage - 1) * restaurantPageSize;
+    return filteredRestaurants.slice(start, start + restaurantPageSize);
+  }, [filteredRestaurants, restaurantPage, restaurantPageSize]);
+
   const stats = useMemo(() => {
     const total = restaurants.length;
     const active = restaurants.filter((r) => r.is_active).length;
     const inactive = total - active;
-    return { total, active, inactive };
-  }, [restaurants]);
+    const createdByMe = myRestaurants.length;
+    const myActive = myRestaurants.filter((r) => r.created_by === currentProfile.id && r.is_active).length;
+    const myInactive = createdByMe - myActive;
+    const myContributionRate = total > 0 ? Math.round((createdByMe / total) * 100) : 0;
+    const platformActiveRate = total > 0 ? Math.round((active / total) * 100) : 100;
+    return {
+      total,
+      active,
+      inactive,
+      createdByMe,
+      myActive,
+      myInactive,
+      myContributionRate,
+      platformActiveRate,
+    };
+  }, [restaurants, myRestaurants]);
 
   const packageDistribution = useMemo(() => {
+    const targetList = packageScope === "my" ? myRestaurants : restaurants;
     const counts = new Map<string, number>();
-    restaurants.forEach((restaurant) => {
+    targetList.forEach((restaurant) => {
       counts.set(restaurant.package, (counts.get(restaurant.package) ?? 0) + 1);
     });
     return PACKAGES.map((pkg) => ({ key: pkg, value: counts.get(pkg) ?? 0 }));
-  }, [restaurants]);
+  }, [restaurants, myRestaurants, packageScope]);
+
+  const displayedDirectory = useMemo(() => {
+    const list = quickDirectoryScope === "my" ? myRestaurants : restaurants;
+    return list.slice(0, 6);
+  }, [quickDirectoryScope, myRestaurants, restaurants]);
 
   function handleLogoutRequest() {
     setShowLogoutModal(true);
@@ -139,43 +202,54 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
         {/* Sidebar */}
         <aside className="hidden w-72 shrink-0 border-r border-zinc-200 bg-white lg:block">
           <div className="sticky top-0 flex h-screen flex-col">
-            <div className="border-b border-zinc-100 px-5 py-5">
-              <div className="flex items-center gap-2">
-                <Image src="/logo/m360logo.png" alt="Marinate360" width={24} height={24} className="h-6 w-auto object-contain" />
-                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-700">STAFF</span>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Marinate360</p>
+            <div className="flex flex-col">
+              <div className="border-b border-zinc-100 px-5 py-5">
+                <div className="flex items-center gap-2">
+                  <Image src="/logo/m360logo.png" alt="Marinate360" width={24} height={24} className="h-6 w-auto object-contain" />
+                  <p className="text-md font-semibold uppercase tracking-[0.1em] text-orange-600">Marinate360</p>
+                </div>
+                <h1 className="mt-2 text-xl font-semibold tracking-tight">Staff Portal</h1>
+                {/* <p className="mt-1 truncate text-sm text-zinc-500">{currentProfile.email || currentProfile.username || "Staff User"}</p> */}
               </div>
-              <h1 className="mt-2 text-xl font-semibold tracking-tight">Staff Portal</h1>
-              <p className="mt-1 truncate text-sm text-zinc-500">{profile.email || profile.username || "Staff User"}</p>
+              <nav className="space-y-1 px-3 py-4">
+                <SidebarButton
+                  icon={<LayoutDashboard size={18} />}
+                  label="Overview"
+                  active={activeView === "overview"}
+                  onClick={() => {
+                    setActiveView("overview");
+                    setSelectedRestaurantId("");
+                  }}
+                />
+                <SidebarButton
+                  icon={<Store size={18} />}
+                  label="Restaurants"
+                  active={activeView === "restaurants"}
+                  onClick={() => setActiveView("restaurants")}
+                  badge={stats.total}
+                />
+                <SidebarButton
+                  icon={<Users size={18} />}
+                  label="Users"
+                  active={activeView === "users"}
+                  onClick={() => {
+                    setActiveView("users");
+                    setSelectedRestaurantId("");
+                  }}
+                />
+                <SidebarButton
+                  icon={<SettingsIcon size={18} />}
+                  label="Settings"
+                  active={activeView === "settings"}
+                  onClick={() => {
+                    setActiveView("settings");
+                    setSelectedRestaurantId("");
+                  }}
+                />
+              </nav>
             </div>
-            <nav className="flex-1 space-y-1 px-3 py-4">
-              <SidebarButton
-                icon={<LayoutDashboard size={18} />}
-                label="Overview"
-                active={activeView === "overview"}
-                onClick={() => {
-                  setActiveView("overview");
-                  setSelectedRestaurantId("");
-                }}
-              />
-              <SidebarButton
-                icon={<Store size={18} />}
-                label="Restaurants"
-                active={activeView === "restaurants"}
-                onClick={() => setActiveView("restaurants")}
-                badge={stats.total}
-              />
-            </nav>
-            <div className="border-t border-zinc-100 p-4">
-              <button
-                onClick={handleLogoutRequest}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
-              >
-                <LogOut size={16} />
-                Logout
-              </button>
+
             </div>
-          </div>
         </aside>
 
         {/* Content Section */}
@@ -186,7 +260,7 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-600">Staff workspace</p>
                   <h2 className="mt-1 text-2xl font-semibold tracking-tight">
-                    {activeView === "overview" ? "Overview & Operations" : "Restaurant Directory & Settings"}
+                    {activeView === "overview" ? "Overview & Operations" : activeView === "restaurants" ? "Restaurant Directory & Settings" : activeView === "users" ? "User & Admin Management" : "Account & Profile Settings"}
                   </h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -204,6 +278,74 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                     <Plus size={16} />
                     New restaurant
                   </button>
+
+                  {/* Top-Right Account Menu */}
+                  <div className="relative ml-1">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsMenuOpen((prev) => !prev)}
+                      className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1 pl-1.5 pr-2.5 text-xs font-semibold shadow-2xs hover:bg-zinc-50 transition"
+                    >
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-xs font-bold">
+                        {(currentProfile.first_name?.[0] || currentProfile.username?.[0] || currentProfile.email?.[0] || "U").toUpperCase()}
+                      </div>
+                      <div className="hidden sm:flex flex-col text-left">
+                        <span className="text-xs font-bold text-zinc-900 leading-tight">
+                          {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || "Staff User"}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 capitalize">{currentProfile.role.replace("_", " ")}</span>
+                      </div>
+                      <ChevronDown size={14} className={`text-zinc-400 transition-transform ${settingsMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {settingsMenuOpen && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setSettingsMenuOpen(false)} />
+                        <div className="absolute right-0 top-full mt-2 z-40 w-60 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-3 py-2 border-b border-zinc-100">
+                            <p className="text-xs font-bold text-zinc-900">
+                              {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || "Account"}
+                            </p>
+                            <p className="text-xs text-zinc-500 truncate mt-0.5">{currentProfile.email}</p>
+
+                          </div>
+
+                          <div className="py-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettingsMenuOpen(false);
+                                setActiveView("settings");
+                                setSelectedRestaurantId("");
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                activeView === "settings"
+                                  ? "bg-orange-50 text-orange-700"
+                                  : "text-zinc-700 hover:bg-zinc-100"
+                              }`}
+                            >
+                              <User size={14} className="text-zinc-500" />
+                              Profile & Password
+                            </button>
+                          </div>
+
+                          <div className="border-t border-zinc-100 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettingsMenuOpen(false);
+                                handleLogoutRequest();
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+                            >
+                              <LogOut size={14} className="text-rose-500" />
+                              Sign out
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex gap-2 overflow-x-auto lg:hidden">
@@ -233,118 +375,222 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
           <div className="p-4 sm:p-6 xl:p-8">
             {activeView === "overview" && (
               <div className="space-y-6">
-                {/* Stats Grid */}
-                <section className="grid gap-4 sm:grid-cols-3">
-                  <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-500">Total Restaurants</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight">{stats.total}</p>
-                      </div>
-                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-orange-100 text-orange-700">
-                        <Store size={20} />
+                {/* 4 Clean Metric Cards */}
+                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  {/* Created by You */}
+                  <article className="rounded-xl border border-zinc-200/80 bg-white p-5 shadow-xs transition hover:border-zinc-300">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Created by You</p>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                        <UserCheck size={18} />
                       </div>
                     </div>
+                    <p className="mt-3 text-3xl font-bold tracking-tight text-zinc-900">{stats.createdByMe}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {stats.myActive} active {stats.myInactive > 0 ? `· ${stats.myInactive} inactive` : ""}
+                    </p>
                   </article>
-                  <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-500">Active Outlets</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight">{stats.active}</p>
-                      </div>
-                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-emerald-100 text-emerald-700">
-                        <CheckCircle2 size={20} />
+
+                  {/* Total Outlets */}
+                  <article className="rounded-xl border border-zinc-200/80 bg-white p-5 shadow-xs transition hover:border-zinc-300">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Total Restaurants</p>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-50 text-orange-600">
+                        <Store size={18} />
                       </div>
                     </div>
+                    <p className="mt-3 text-3xl font-bold tracking-tight text-zinc-900">{stats.total}</p>
+                    <p className="mt-1 text-xs text-zinc-500">All registered outlets</p>
                   </article>
-                  <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-500">Inactive Outlets</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight">{stats.inactive}</p>
-                      </div>
-                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-zinc-100 text-zinc-700">
-                        <XCircle size={20} />
+
+                  {/* Active Outlets */}
+                  <article className="rounded-xl border border-zinc-200/80 bg-white p-5 shadow-xs transition hover:border-zinc-300">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Active Outlets</p>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                        <CheckCircle2 size={18} />
                       </div>
                     </div>
+                    <p className="mt-3 text-3xl font-bold tracking-tight text-emerald-700">{stats.active}</p>
+                    <p className="mt-1 text-xs text-zinc-500">Live in production</p>
+                  </article>
+
+                  {/* Inactive Outlets */}
+                  <article className="rounded-xl border border-zinc-200/80 bg-white p-5 shadow-xs transition hover:border-zinc-300">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Inactive Outlets</p>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <XCircle size={18} />
+                      </div>
+                    </div>
+                    <p className="mt-3 text-3xl font-bold tracking-tight text-zinc-900">{stats.inactive}</p>
+                    <p className="mt-1 text-xs text-zinc-500">Draft or offline</p>
                   </article>
                 </section>
 
-                {/* Package Distribution & Quick Actions */}
-                <section className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-zinc-700">
-                      <BarChart3 size={18} className="text-orange-600" />
-                      Package distribution
+                {/* 2-Column Clean Layout: Outlets Directory + Package Distribution */}
+                <section className="grid gap-6 lg:grid-cols-5">
+                  {/* Left Column (3/5): Recent Outlets */}
+                  <div className="rounded-xl border border-zinc-200/80 bg-white p-5 shadow-xs lg:col-span-3">
+                    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Building2 size={18} className="text-zinc-600" />
+                        <h3 className="text-sm font-semibold text-zinc-900">Recent Outlets</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setQuickDirectoryScope("all")}
+                            className={`rounded-md px-2.5 py-1 font-medium transition ${
+                              quickDirectoryScope === "all" ? "bg-white text-zinc-900 shadow-2xs font-semibold" : "text-zinc-500 hover:text-zinc-800"
+                            }`}
+                          >
+                            All ({stats.total})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setQuickDirectoryScope("my")}
+                            className={`rounded-md px-2.5 py-1 font-medium transition ${
+                              quickDirectoryScope === "my" ? "bg-indigo-600 text-white shadow-2xs font-semibold" : "text-zinc-500 hover:text-zinc-800"
+                            }`}
+                          >
+                            Mine ({stats.createdByMe})
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => setActiveView("restaurants")}
+                          className="text-xs font-semibold text-orange-600 hover:text-orange-700"
+                        >
+                          View all &rarr;
+                        </button>
+                      </div>
                     </div>
-                    <div className="space-y-4">
+
+                    {displayedDirectory.length === 0 ? (
+                      <div className="py-12 text-center">
+                        <Store size={28} className="mx-auto text-zinc-300" />
+                        <p className="mt-2 text-sm font-medium text-zinc-600">No outlets found</p>
+                        <p className="mt-0.5 text-xs text-zinc-400">
+                          {quickDirectoryScope === "my"
+                            ? "You haven't onboarded any outlets yet."
+                            : "No registered outlets."}
+                        </p>
+                        {quickDirectoryScope === "my" && (
+                          <button
+                            onClick={() => setShowCreate(true)}
+                            className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                          >
+                            <Plus size={14} /> New restaurant
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-zinc-100">
+                        {displayedDirectory.map((r) => (
+                          <div key={r.id} className="flex items-center justify-between py-3">
+                            <div className="min-w-0 pr-3">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate font-semibold text-zinc-900 text-sm">{r.restaurant_name}</p>
+                                {r.created_by === currentProfile.id ? (
+                                  <span className="shrink-0 rounded-full bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                    You
+                                  </span>
+                                ) : null}
+                                <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                  r.is_active ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-500"
+                                }`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${r.is_active ? "bg-emerald-500" : "bg-zinc-400"}`} />
+                                  {r.is_active ? "Live" : "Draft"}
+                                </span>
+                              </div>
+                              <p className="truncate text-xs text-zinc-400 mt-0.5">{r.domain_name}</p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                onClick={() => router.push(`/onboarding?editRestaurantId=${encodeURIComponent(r.id)}`)}
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                              >
+                                <Pencil size={11} />
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedRestaurantId(r.id);
+                                  setRestaurantPanelTab("overview");
+                                  setActiveView("restaurants");
+                                }}
+                                className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                              >
+                                Details
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSelectedRestaurantId(r.id);
+                                  setRestaurantPanelTab("settings");
+                                  setActiveView("restaurants");
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                              >
+                                <Sliders size={12} />
+                                Settings
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column (2/5): Package Distribution */}
+                  <div className="rounded-xl border border-zinc-200/80 bg-white p-5 shadow-xs lg:col-span-2">
+                    <div className="mb-4 flex items-center justify-between border-b border-zinc-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <BarChart3 size={18} className="text-zinc-600" />
+                        <h3 className="text-sm font-semibold text-zinc-900">Packages</h3>
+                      </div>
+                      <div className="flex items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setPackageScope("all")}
+                          className={`rounded-md px-2.5 py-1 font-medium transition ${
+                            packageScope === "all" ? "bg-white text-zinc-900 shadow-2xs font-semibold" : "text-zinc-500 hover:text-zinc-800"
+                          }`}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPackageScope("my")}
+                          className={`rounded-md px-2.5 py-1 font-medium transition ${
+                            packageScope === "my" ? "bg-indigo-600 text-white shadow-2xs font-semibold" : "text-zinc-500 hover:text-zinc-800"
+                          }`}
+                        >
+                          Mine
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 pt-1">
                       {packageDistribution.map((item) => {
                         const max = Math.max(...packageDistribution.map((d) => d.value), 1);
                         return (
                           <div key={item.key}>
-                            <div className="mb-1 flex justify-between text-sm">
+                            <div className="mb-1.5 flex justify-between text-xs">
                               <span className="font-medium capitalize text-zinc-700">
                                 {item.key.replace("marinate-", "")}
                               </span>
-                              <span className="text-zinc-500">{item.value}</span>
+                              <span className="font-semibold text-zinc-900">{item.value}</span>
                             </div>
-                            <div className="h-2 rounded-full bg-zinc-100">
+                            <div className="h-2 rounded-full bg-zinc-100 overflow-hidden">
                               <div
-                                className="h-2 rounded-full bg-orange-500"
-                                style={{ width: `${Math.max((item.value / max) * 100, item.value ? 8 : 0)}%` }}
+                                className="h-full rounded-full bg-orange-500 transition-all duration-300"
+                                style={{ width: `${Math.max((item.value / max) * 100, item.value ? 10 : 0)}%` }}
                               />
                             </div>
                           </div>
                         );
                       })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700">
-                        <Building2 size={18} className="text-sky-600" />
-                        Quick Directory
-                      </div>
-                      <button
-                        onClick={() => setActiveView("restaurants")}
-                        className="text-xs font-semibold text-orange-600 hover:text-orange-700"
-                      >
-                        View all ({restaurants.length}) &rarr;
-                      </button>
-                    </div>
-                    <div className="divide-y divide-zinc-100">
-                      {restaurants.slice(0, 5).map((r) => (
-                        <div key={r.id} className="flex items-center justify-between py-3">
-                          <div>
-                            <p className="font-semibold text-zinc-900">{r.restaurant_name}</p>
-                            <p className="text-xs text-zinc-500">{r.domain_name}</p>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => {
-                                setSelectedRestaurantId(r.id);
-                                setRestaurantPanelTab("overview");
-                                setActiveView("restaurants");
-                              }}
-                              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                            >
-                              Details
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedRestaurantId(r.id);
-                                setRestaurantPanelTab("settings");
-                                setActiveView("restaurants");
-                              }}
-                              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                            >
-                              <Sliders size={12} />
-                              Settings
-                            </button>
-                          </div>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 </section>
@@ -360,7 +606,7 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                   activeTab={restaurantPanelTab}
                   onTabChange={setRestaurantPanelTab}
                   onBack={() => setSelectedRestaurantId("")}
-                  onEdit={() => setEditingRestaurant(selectedRestaurant)}
+                  onEdit={() => router.push(`/onboarding?editRestaurantId=${encodeURIComponent(selectedRestaurant.id)}`)}
                 />
               ) : (
                 <section className="space-y-5">
@@ -374,6 +620,31 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                         <p className="mt-1 text-sm text-zinc-500">
                           Browse registered restaurants, view operational details, and inspect configurations.
                         </p>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setRestaurantFilter("all")}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                              restaurantFilter === "all"
+                                ? "bg-orange-500 text-white shadow-xs"
+                                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                            }`}
+                          >
+                            All Restaurants ({restaurants.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRestaurantFilter("my")}
+                            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                              restaurantFilter === "my"
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                            }`}
+                          >
+                            <UserCheck size={13} />
+                            Created by Me ({stats.createdByMe})
+                          </button>
+                        </div>
                       </div>
                       <label className="relative block w-full max-w-md">
                         <Search
@@ -390,15 +661,16 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                     </div>
                   </div>
 
-                  {filterRestaurants(restaurants, restaurantSearch).length === 0 ? (
+                  {filteredRestaurants.length === 0 ? (
                     <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center shadow-sm">
                       <Store size={36} className="mx-auto text-zinc-300" />
                       <h3 className="mt-3 text-lg font-semibold text-zinc-900">No restaurants found</h3>
                       <p className="mt-1 text-sm text-zinc-500">Try a different search query or create a new restaurant.</p>
                     </div>
                   ) : (
-                    <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-                      {filterRestaurants(restaurants, restaurantSearch).map((restaurant) => (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                        {paginatedRestaurants.map((restaurant) => (
                         <div
                           key={restaurant.id}
                           className="group rounded-lg border border-zinc-200 bg-white p-5 shadow-sm transition hover:border-orange-300 hover:shadow-md"
@@ -410,15 +682,26 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                               </h4>
                               <p className="mt-1 truncate text-sm text-zinc-500">{restaurant.domain_name}</p>
                             </div>
-                            <span
-                              className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-                                restaurant.is_active
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-zinc-100 text-zinc-600"
-                              }`}
-                            >
-                              {restaurant.is_active ? "Active" : "Inactive"}
-                            </span>
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                  restaurant.is_active
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : "bg-zinc-100 text-zinc-600"
+                                }`}
+                              >
+                                {restaurant.is_active ? "Active" : "Inactive"}
+                              </span>
+                              {restaurant.created_by === currentProfile.id ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                  <UserCheck size={10} /> Created by You
+                                </span>
+                              ) : restaurant.creator_role ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                                  {restaurant.creator_role === "super_admin" ? "Admin" : "Staff"}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
 
                           <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3">
@@ -426,6 +709,14 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                               {restaurant.package.replace("marinate-", "")}
                             </span>
                             <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => router.push(`/onboarding?editRestaurantId=${encodeURIComponent(restaurant.id)}`)}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600 hover:text-zinc-900"
+                              >
+                                <Pencil size={12} />
+                                Edit
+                              </button>
+                              <span className="text-zinc-300">•</span>
                               <button
                                 onClick={() => {
                                   setSelectedRestaurantId(restaurant.id);
@@ -451,23 +742,89 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                           </div>
                         </div>
                       ))}
+                      </div>
+
+                      {/* Pagination Toolbar */}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-zinc-200 bg-white p-4 shadow-sm text-xs">
+                        {/* Left: Rows per page */}
+                        <div className="flex items-center gap-1.5 font-medium text-zinc-600">
+                          <span>Rows per page:</span>
+                          <select
+                            value={restaurantPageSize}
+                            onChange={(e) => {
+                              setRestaurantPageSize(Number(e.target.value));
+                              setRestaurantPage(1);
+                            }}
+                            className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500"
+                          >
+                            <option value={5}>5</option>
+                            <option value={10}>10</option>
+                            <option value={15}>15</option>
+                            <option value={20}>20</option>
+                          </select>
+                        </div>
+
+                        {/* Center: Showing count */}
+                        <div className="text-center font-medium text-zinc-500">
+                          Showing {filteredRestaurants.length === 0 ? 0 : (restaurantPage - 1) * restaurantPageSize + 1}–{Math.min(restaurantPage * restaurantPageSize, filteredRestaurants.length)} of {filteredRestaurants.length} restaurants
+                        </div>
+
+                        {/* End: Prev / Page / Next */}
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            disabled={restaurantPage <= 1}
+                            onClick={() => setRestaurantPage((p) => Math.max(1, p - 1))}
+                            className="inline-flex items-center rounded-lg border border-zinc-200 px-3 py-1 font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Previous
+                          </button>
+                          <span className="px-1 font-medium text-zinc-600">
+                            Page <strong className="text-zinc-900">{restaurantPage}</strong> of <strong className="text-zinc-900">{totalRestaurantPages}</strong>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={restaurantPage >= totalRestaurantPages}
+                            onClick={() => setRestaurantPage((p) => Math.min(totalRestaurantPages, p + 1))}
+                            className="inline-flex items-center rounded-lg border border-zinc-200 px-3 py-1 font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </section>
               )
+            )}
+
+            {activeView === "users" && (
+              <UsersManagementView
+                accessToken={accessToken}
+                restaurants={restaurants}
+                currentUserRole="staff"
+              />
+            )}
+
+            {activeView === "settings" && (
+              <AccountSettingsView
+                accessToken={accessToken}
+                profile={currentProfile}
+                onProfileUpdated={(updated) => {
+                  setCurrentProfile(updated);
+                }}
+              />
             )}
           </div>
         </section>
       </div>
 
       {showCreate && (
-        <CreateRestaurantModal
-          accessToken={accessToken}
+        <SelectPackageModal
           onClose={() => setShowCreate(false)}
-          onCreated={async (newId) => {
+          onSelect={(pkgKey, services) => {
             setShowCreate(false);
-            await fetchRestaurants();
-            setSelectedRestaurantId(newId);
+            router.push(`/onboarding?package=${encodeURIComponent(pkgKey)}&services=${encodeURIComponent(services.join(","))}`);
           }}
         />
       )}
@@ -485,6 +842,7 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
           }}
         />
       )}
+
       {/* Logout Confirmation Modal */}
       {showLogoutModal && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">

@@ -10,6 +10,10 @@ export type AuthenticatedUser = {
   role: string;
   username: string | null;
   restaurant_id: string | null;
+  restaurant_ids?: string[] | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -57,7 +61,7 @@ export async function getUserFromAccessToken(accessToken: string): Promise<Authe
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("id, email, username, role, restaurant_id")
+    .select("id, email, username, role, restaurant_id, restaurant_ids, first_name, last_name, phone")
     .eq("id", userData.user.id)
     .maybeSingle();
 
@@ -71,6 +75,10 @@ export async function getUserFromAccessToken(accessToken: string): Promise<Authe
     role: profile?.role ?? "customer",
     username: profile?.username ?? userData.user.user_metadata?.username ?? null,
     restaurant_id: profile?.restaurant_id ?? null,
+    restaurant_ids: profile?.restaurant_ids ?? null,
+    first_name: profile?.first_name ?? null,
+    last_name: profile?.last_name ?? null,
+    phone: profile?.phone ?? null,
   };
 }
 

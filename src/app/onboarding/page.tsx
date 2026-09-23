@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { ArrowLeft, Lock, Globe, Store, Shield, MapPin, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
-import { Map as LMap, Marker as LMarker } from 'leaflet';
-import { submitOnboardingApplication } from "@/src/app/actions/onboarding-applications";
+
+import { submitOnboardingApplication, updateMyOnboardingApplicationWithFormData, getMyOnboardingApplication } from "@/src/app/actions/onboarding-applications";
+import { createRestaurantWithFormData, updateRestaurantWithFormData, getRestaurantDetails } from "@/src/app/actions/restaurants";
 import { supabase } from "@/src/lib/supabase/client";
 import { getAuthSession } from "@/src/lib/auth-storage";
 
@@ -13,7 +15,7 @@ import { getAuthSession } from "@/src/lib/auth-storage";
 type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday";
 type CountryCode = "+91" | "+1" | "+44" | "+971";
 type ServiceType = "dine_in" | "delivery" | "takeaway" | "catering";
-type AccountType = "savings" | "current";
+type AccountType = "savings" | "current" | "checking";
 type TimingMode = "all_days" | "custom_days" | "same_time" | "day_wise";
 
 interface TimeSlot {
@@ -27,10 +29,16 @@ interface ErrorMap {
 
 interface ResolvedAddress {
   buildingno?: string;
+  floor?: string;
   area?: string;
   city?: string;
+  state?: string;
+  country?: string;
   pincode?: string;
   landmark?: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  fullAddress?: string;
 }
 
 interface User {
@@ -101,7 +109,7 @@ const TIME_SLOTS = [
   "23:59",
 ];
 
-// Map Component
+// Google Maps Location Picker Component
 const LocationPicker = ({
   onLocationSelect,
   onAddressResolved,
@@ -111,266 +119,320 @@ const LocationPicker = ({
   onAddressResolved: (address: ResolvedAddress) => void;
   initialLocation: { lat: number; lng: number } | null;
 }) => {
-  const [map, setMap] = useState<LMap|null>(null); 
-  const [marker, setMarker] = useState<LMarker |null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const markerInstanceRef = useRef<any>(null);
+  const autocompleteRef = useRef<any>(null);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [user, setUser] = useState<{
-    username?: string;
-    isLoggedIn?: boolean;
-    role?: string;
-    email?: string;
-  } | null>(null);
-  void user;
+  const [isLocating, setIsLocating] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const normalizeAddress = (address?: Record<string, string>): ResolvedAddress => {
-    if (!address) return {};
+  // Load Google Maps SDK
+  useEffect(() => {
+    if (typeof window === "undefined") return;
 
-    return {
-      buildingno: [address.house_number, address.road].filter(Boolean).join(" ").trim(),
-      area:
-        address.suburb ||
-        address.neighbourhood ||
-        address.city_district ||
-        address.county ||
-        address.road ||
-        "",
-      city:
-        address.city ||
-        address.town ||
-        address.village ||
-        address.municipality ||
-        address.state_district ||
-        "",
-      pincode: address.postcode || "",
-      landmark: address.neighbourhood || address.suburb || address.amenity || "",
-    };
-  };
-
-  const resolveAddressFromCoordinates = async (lat: number, lng: number) => {
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1`
-      );
-      const data = await response.json();
-      onAddressResolved(normalizeAddress(data?.address));
-    } catch (error) {
-      console.error("Reverse geocode error:", error);
+    if ((window as any).google && (window as any).google.maps) {
+      setMapLoaded(true);
+      return;
     }
-  };
 
+    const apiKey =
+      process.env.NEXT_PUBLIC_GOOGLE_MAPS_CLIENT_KEY ||
+      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      "";
 
-
-
-
-
-  useEffect(() => {
-          const loadUserData = () => {
-            try {
-              const getFromStorage = (key: string) =>
-                sessionStorage.getItem(key) || localStorage.getItem(key);
-      
-              const storedUser = getFromStorage('user');
-              const storedIsLoggedIn = getFromStorage('isLoggedIn');
-      
-              let parsedUser: User | null = null;
-              let username: string = "";
-                let role: string = "";
-                let email: string = "";
-      
-              if (storedUser) {
-                try {
-                  parsedUser = JSON.parse(storedUser);
-                  username = parsedUser?.username || parsedUser?.name || parsedUser?.email?.split('@')[0] || 'User';
-                    role = parsedUser?.role || 'customer';
-                      email = parsedUser?.email || '';
-                } catch (e) {
-                  console.error('Error parsing user data:', e);
-                }
-              }
-      
-              const isLoggedIn = !!parsedUser || storedIsLoggedIn === 'true';
-      
-              if (isLoggedIn && username) {
-                setUser({
-                  username,
-                  isLoggedIn: true,
-                    role: role,
-                      email: email,
-                });
-              } else {
-                setUser({ isLoggedIn: false });
-              }
-            } catch (err) {
-              console.error('Error loading user data:', err);
-              setUser({ isLoggedIn: false });
-            }
-          };
-      
-          loadUserData();
-          const timeoutId = setTimeout(loadUserData, 200);
-      
-          const handleStorageChange = (e: StorageEvent) => {
-            if (['user', 'isLoggedIn'].includes(e.key || '')) {
-              loadUserData();
-            }
-          };
-      
-          window.addEventListener('storage', handleStorageChange);
-          return () => {
-            clearTimeout(timeoutId);
-            window.removeEventListener('storage', handleStorageChange);
-          };
-  }, []);
-  
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      import("leaflet").then((L) => {
-        delete (L.default.Icon.Default.prototype as any)._getIconUrl;
-        L.default.Icon.Default.mergeOptions({
-          iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-          iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-          shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-        });
-
-        const mapInstance = L.default.map("map").setView(
-          initialLocation ? [initialLocation.lat, initialLocation.lng] : [17.385044, 78.486671],
-          13
+    const scriptId = "google-maps-js-sdk";
+    const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (existingScript) {
+      if ((window as any).google && (window as any).google.maps) {
+        setMapLoaded(true);
+      } else {
+        existingScript.addEventListener("load", () => setMapLoaded(true));
+        existingScript.addEventListener("error", () =>
+          setLoadError("Failed to initialize Google Maps. Please verify NEXT_PUBLIC_GOOGLE_MAPS_CLIENT_KEY.")
         );
-
-        L.default.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "© OpenStreetMap contributors",
-        }).addTo(mapInstance);
-
-        const markerInstance = L.default.marker(
-          initialLocation ? [initialLocation.lat, initialLocation.lng] : [17.385044, 78.486671],
-          { draggable: true }
-        ).addTo(mapInstance);
-
-        markerInstance.on("dragend", (e: any) => {
-          const position = e.target.getLatLng();
-          onLocationSelect(position.lat, position.lng);
-          void resolveAddressFromCoordinates(position.lat, position.lng);
-        });
-
-        mapInstance.on("click", (e: any) => {
-          markerInstance.setLatLng(e.latlng);
-          onLocationSelect(e.latlng.lat, e.latlng.lng);
-          void resolveAddressFromCoordinates(e.latlng.lat, e.latlng.lng);
-        });
-
-        setMap(mapInstance);
-        setMarker(markerInstance);
-
-        return () => {
-          if (mapInstance) {
-            mapInstance.remove();
-          }
-        };
-      }).catch((error) => {
-        console.error("Error loading Leaflet:", error);
-      });
+      }
+      return;
     }
-  }, [initialLocation, onLocationSelect]);
 
-  const handleSearch = async () => {
+    const script = document.createElement("script");
+    script.id = scriptId;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      setMapLoaded(true);
+    };
+    script.onerror = () => {
+      setLoadError("Failed to load Google Maps SDK. Please check NEXT_PUBLIC_GOOGLE_MAPS_CLIENT_KEY in .env");
+    };
+    document.head.appendChild(script);
+  }, []);
+
+  // Helper to extract address components from Geocoder result
+  const extractAddressFromComponents = (
+    addressComponents: any[],
+    fallbackLandmark?: string,
+    formattedAddress?: string
+  ) => {
+    const getComp = (types: string[]) => {
+      const found = addressComponents?.find((c: any) =>
+        types.some((t: string) => c.types.includes(t))
+      );
+      return found ? found.long_name : "";
+    };
+
+    const streetNumber = getComp(["street_number"]);
+    const route = getComp(["route"]);
+    const subpremise = getComp(["subpremise", "premise"]);
+    const building = [subpremise, streetNumber, route].filter(Boolean).join(" ").trim() || route;
+
+    const sublocality = getComp(["sublocality_level_1", "sublocality", "neighborhood"]) || route;
+    const locality = getComp(["locality", "administrative_area_level_2"]);
+    const administrativeArea = getComp(["administrative_area_level_1"]);
+    const country = getComp(["country"]) || "India";
+    const postalCode = getComp(["postal_code"]);
+    const landmark = fallbackLandmark || getComp(["point_of_interest", "establishment", "sublocality_level_2"]);
+
+    onAddressResolved({
+      buildingno: building || "",
+      area: sublocality || "",
+      city: locality || "",
+      state: administrativeArea || "Telangana",
+      country: country || "India",
+      pincode: postalCode ? postalCode.trim().slice(0, 10) : "",
+      landmark: landmark || "",
+      fullAddress: formattedAddress || "",
+      address_line_1: formattedAddress || [building, sublocality].filter(Boolean).join(", "),
+      address_line_2: [route, sublocality].filter(Boolean).join(", ") || "",
+    });
+  };
+
+  const reverseGeocode = (lat: number, lng: number) => {
+    const google = (window as any).google;
+    if (!google || !google.maps) return;
+
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ location: { lat, lng } }, (results: any, status: string) => {
+      if (status === "OK" && results && results[0]) {
+        extractAddressFromComponents(results[0].address_components, undefined, results[0].formatted_address);
+      }
+    });
+  };
+
+  // Initialize Map & Marker
+  useEffect(() => {
+    if (!mapLoaded || !mapContainerRef.current) return;
+    const google = (window as any).google;
+    if (!google || !google.maps) return;
+
+    const center = initialLocation
+      ? { lat: initialLocation.lat, lng: initialLocation.lng }
+      : { lat: 17.385044, lng: 78.486671 };
+
+    const map = new google.maps.Map(mapContainerRef.current, {
+      center,
+      zoom: initialLocation ? 16 : 14,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+      zoomControl: true,
+    });
+    mapInstanceRef.current = map;
+
+    const marker = new google.maps.Marker({
+      position: center,
+      map,
+      draggable: true,
+      animation: google.maps.Animation.DROP,
+    });
+    markerInstanceRef.current = marker;
+
+    // Marker dragend
+    marker.addListener("dragend", () => {
+      const pos = marker.getPosition();
+      if (pos) {
+        const lat = pos.lat();
+        const lng = pos.lng();
+        onLocationSelect(lat, lng);
+        reverseGeocode(lat, lng);
+      }
+    });
+
+    // Map click
+    map.addListener("click", (e: any) => {
+      if (e.latLng) {
+        marker.setPosition(e.latLng);
+        const lat = e.latLng.lat();
+        const lng = e.latLng.lng();
+        onLocationSelect(lat, lng);
+        reverseGeocode(lat, lng);
+      }
+    });
+
+    // Google Places Autocomplete on Search input
+    if (searchInputRef.current && google.maps.places) {
+      const autocomplete = new google.maps.places.Autocomplete(searchInputRef.current, {
+        fields: ["geometry", "formatted_address", "address_components", "name"],
+      });
+      autocomplete.bindTo("bounds", map);
+      autocomplete.addListener("place_changed", () => {
+        const place = autocomplete.getPlace();
+        if (!place.geometry || !place.geometry.location) return;
+
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        map.setCenter({ lat, lng });
+        map.setZoom(16);
+        marker.setPosition({ lat, lng });
+        onLocationSelect(lat, lng);
+
+        if (place.address_components) {
+          extractAddressFromComponents(place.address_components, place.name, place.formatted_address);
+        } else {
+          reverseGeocode(lat, lng);
+        }
+        toast.success("Location set from Google Places!");
+      });
+      autocompleteRef.current = autocomplete;
+    }
+  }, [mapLoaded]);
+
+  // Sync map and marker when initialLocation loads asynchronously
+  useEffect(() => {
+    if (initialLocation && mapInstanceRef.current && markerInstanceRef.current) {
+      const google = (window as any).google;
+      if (google && google.maps) {
+        const latLng = new google.maps.LatLng(initialLocation.lat, initialLocation.lng);
+        mapInstanceRef.current.setCenter(latLng);
+        mapInstanceRef.current.setZoom(16);
+        markerInstanceRef.current.setPosition(latLng);
+      }
+    }
+  }, [initialLocation?.lat, initialLocation?.lng]);
+
+  // Handle manual Enter / click search
+  const handleManualSearch = () => {
     if (!searchQuery.trim()) {
       toast.error("Please enter a location to search");
       return;
     }
+    const google = (window as any).google;
+    if (!google || !google.maps) return;
+
     setIsSearching(true);
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&q=${encodeURIComponent(searchQuery)}`
-      );
-      const data = await response.json();
-      if (data && data.length > 0) {
-        const { lat, lon } = data[0];
-        if (map && marker) {
-          map.setView([parseFloat(lat), parseFloat(lon)], 15);
-          marker.setLatLng([parseFloat(lat), parseFloat(lon)]);
-          onLocationSelect(parseFloat(lat), parseFloat(lon));
-          onAddressResolved(normalizeAddress(data[0]?.address));
-          toast.success("Location found!");
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: searchQuery }, (results: any, status: string) => {
+      setIsSearching(false);
+      if (status === "OK" && results && results[0]) {
+        const res = results[0];
+        const lat = res.geometry.location.lat();
+        const lng = res.geometry.location.lng();
+        if (mapInstanceRef.current && markerInstanceRef.current) {
+          mapInstanceRef.current.setCenter({ lat, lng });
+          mapInstanceRef.current.setZoom(16);
+          markerInstanceRef.current.setPosition({ lat, lng });
+          onLocationSelect(lat, lng);
+          extractAddressFromComponents(res.address_components, undefined, res.formatted_address);
+          toast.success("Location found on map!");
         }
       } else {
         toast.error("Location not found. Please try another search.");
       }
-    } catch (error) {
-      console.error("Search error:", error);
-      toast.error("Error searching location");
-    } finally {
-      setIsSearching(false);
-    }
+    });
   };
 
+  // Instant My Location (fast, zero lag)
   const getCurrentLocation = () => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          if (map && marker) {
-            map.setView([latitude, longitude], 15);
-            marker.setLatLng([latitude, longitude]);
-            onLocationSelect(latitude, longitude);
-            void resolveAddressFromCoordinates(latitude, longitude);
-            toast.success("Current location set!");
-          }
-        },
-        (error) => {
-          console.error("Geolocation error:", error);
-          toast.error("Unable to get current location");
-        }
-      );
-    } else {
+    if (typeof window === "undefined" || !navigator.geolocation) {
       toast.error("Geolocation is not supported by your browser");
+      return;
     }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (mapInstanceRef.current && markerInstanceRef.current) {
+          const google = (window as any).google;
+          const latLng = new google.maps.LatLng(lat, lng);
+          mapInstanceRef.current.panTo(latLng);
+          mapInstanceRef.current.setZoom(16);
+          markerInstanceRef.current.setPosition(latLng);
+          onLocationSelect(lat, lng);
+          reverseGeocode(lat, lng);
+          toast.success("Current location set!");
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        toast.error(err.message || "Failed to retrieve current location");
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
   };
 
   return (
-    <div className="space-y-4 py-3 md:py-auto">
-      <div className="md:flex md:flex-row sm:flex sm:flex-col sm:gap-4 ">
+    <div className="space-y-4 py-2">
+      <div className="flex flex-col sm:flex-row gap-3">
         <button
           type="button"
           onClick={getCurrentLocation}
-          className="px-4 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium flex items-center gap-2 mb-4 md:mb-auto w-full md:w-auto"
+          disabled={isLocating}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-semibold text-xs transition shadow-xs cursor-pointer shrink-0 disabled:opacity-50"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-          My Location
+          <MapPin className="w-4 h-4" />
+          <span>{isLocating ? "Locating..." : "Use My Location"}</span>
         </button>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Search for area, street name..."
-          className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4 md:mb-auto w-full md:w-auto"
-        />
+
+        <div className="relative flex-1">
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleManualSearch()}
+            placeholder="Search area, landmark, or street name..."
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm bg-white"
+          />
+        </div>
+
         <button
           type="button"
-          onClick={handleSearch}
+          onClick={handleManualSearch}
           disabled={isSearching}
-          className="px-6 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition font-medium disabled:opacity-50 w-full md:w-auto"
+          className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-900 text-white rounded-xl font-semibold text-xs transition shadow-xs cursor-pointer disabled:opacity-50 shrink-0"
         >
           {isSearching ? "Searching..." : "Search"}
         </button>
       </div>
-      <div id="map" className="w-full h-96 rounded-lg border-2 border-gray-300"></div>
-      <p className="text-sm text-gray-600">
-        <strong>Tip:</strong> Click on the map or drag the marker to set your exact location
+
+      <div className="relative w-full h-96 rounded-xl border border-gray-300 overflow-hidden shadow-2xs">
+        <div ref={mapContainerRef} className="w-full h-full" />
+        {!mapLoaded && !loadError && (
+          <div className="absolute inset-0 bg-gray-50 flex items-center justify-center">
+            <div className="flex items-center gap-2.5 text-xs font-semibold text-gray-500">
+              <span className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+              <span>Loading Google Maps...</span>
+            </div>
+          </div>
+        )}
+        {loadError && (
+          <div className="absolute inset-0 bg-amber-50/90 flex flex-col items-center justify-center p-4 text-center">
+            <AlertCircle className="w-8 h-8 text-amber-600 mb-2" />
+            <p className="text-sm font-semibold text-amber-800">{loadError}</p>
+            <p className="text-xs text-amber-600 mt-1">Make sure NEXT_PUBLIC_GOOGLE_MAPS_CLIENT_KEY is present in your environment.</p>
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-500 flex items-center gap-1">
+        <strong className="text-gray-700">Tip:</strong> Click anywhere on the map or drag the pin marker to automatically fill your address details below.
       </p>
     </div>
   );
@@ -392,8 +454,11 @@ interface FormDataState {
   area: string;
   city: string;
   state: string;
+  country: string;
   pincode: string;
   landmark: string;
+  address_line_1: string;
+  address_line_2: string;
   latitude: string;
   longitude: string;
   logo_url: File | null;
@@ -444,9 +509,12 @@ export default function OnboardingForm() {
     floor: "",
     area: "",
     city: "",
-    state: "",
+    state: "Telangana",
+    country: "India",
     pincode: "",
     landmark: "",
+    address_line_1: "",
+    address_line_2: "",
     latitude: "",
     longitude: "",
     logo_url: null,
@@ -486,12 +554,18 @@ export default function OnboardingForm() {
       let email = "";
       let fullname = "";
       let hasToken = false;
+      let detectedRole = "customer";
 
       // 1. First priority: Cookie session via getAuthSession
       try {
         const session = getAuthSession();
         if (session.isLoggedIn && session.accessToken) {
           hasToken = true;
+          setSessionAccessToken(session.accessToken);
+        }
+        if (session.user?.role) {
+          detectedRole = session.user.role;
+          setUserRole(session.user.role);
         }
         if (session.user) {
           if (typeof session.user.email === "string" && session.user.email.trim()) {
@@ -519,10 +593,15 @@ export default function OnboardingForm() {
               userData.user.user_metadata?.name ||
               userData.user.user_metadata?.full_name ||
               "";
+            if (userData.user.user_metadata?.role) {
+              detectedRole = userData.user.user_metadata.role;
+              setUserRole(userData.user.user_metadata.role);
+            }
           }
           const { data: sessionData } = await supabase.auth.getSession();
           if (sessionData?.session?.access_token) {
             hasToken = true;
+            setSessionAccessToken(sessionData.session.access_token);
             if (!email && sessionData.session.user?.email) {
               email = sessionData.session.user.email.trim();
             }
@@ -533,13 +612,17 @@ export default function OnboardingForm() {
       }
 
       // 3. Third priority: LocalStorage / SessionStorage fallbacks
-      if (!email && typeof window !== "undefined") {
+      if (typeof window !== "undefined") {
         try {
           const storedUser = sessionStorage.getItem("user") || localStorage.getItem("user");
           if (storedUser) {
             const parsed = JSON.parse(storedUser);
-            if (parsed?.email) email = parsed.email.trim();
-            if (parsed?.username || parsed?.name) fullname = fullname || parsed.username || parsed.name;
+            if (parsed?.role) {
+              detectedRole = parsed.role;
+              setUserRole(parsed.role);
+            }
+            if (!email && parsed?.email) email = parsed.email.trim();
+            if (!fullname && (parsed?.username || parsed?.name)) fullname = fullname || parsed.username || parsed.name;
           }
           if (!email) {
             const directEmail = sessionStorage.getItem("email") || localStorage.getItem("email");
@@ -557,30 +640,293 @@ export default function OnboardingForm() {
         return;
       }
 
-      // Prefill only if valid email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (email && emailRegex.test(email)) {
-        setFormData((prev) => ({
-          ...prev,
-          email,
-          ...(fullname && !prev.fullname ? { fullname } : {}),
-        }));
+      // Prefill ONLY for customers! Staff and super_admin will enter the restaurant owner's name and email manually.
+      const isStaffOrAdminSession = detectedRole === "staff" || detectedRole === "super_admin";
+      if (!isStaffOrAdminSession) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (email && emailRegex.test(email)) {
+          setFormData((prev) => ({
+            ...prev,
+            email,
+            ...(fullname && !prev.fullname ? { fullname } : {}),
+          }));
+        }
       }
     }
 
     loadUserSession();
   }, [router]);
   const [errors, setErrors] = useState<ErrorMap>({});
-  const [previewImages, setPreviewImages] = useState({
+  const [previewImages, setPreviewImages] = useState<{
+    logo_url: string | null;
+    background_image_url: string | null;
+    pan_card: string | null;
+    gst_certificate: string | null;
+    fssai_license: string | null;
+  }>({
     logo_url: null,
     background_image_url: null,
+    pan_card: null,
+    gst_certificate: null,
+    fssai_license: null,
   });
   const [packagename, setPackageName] = useState<string | null>("");
+  const [userRole, setUserRole] = useState<string>("customer");
+  const [sessionAccessToken, setSessionAccessToken] = useState<string>("");
+  const [domainUrl, setDomainUrl] = useState<string>("");
+  const [posDomain, setPosDomain] = useState<string>("");
+  const [customCuisineInput, setCustomCuisineInput] = useState<string>("");
+  const [editAppId, setEditAppId] = useState<string | null>(null);
+  const [editRestaurantId, setEditRestaurantId] = useState<string | null>(null);
+  const [isLiveRestaurantEdit, setIsLiveRestaurantEdit] = useState<boolean>(false);
+
+  const isUS = Boolean(
+    formData.country?.trim().toLowerCase().includes("united states") ||
+    formData.country?.trim().toLowerCase().includes("usa") ||
+    formData.country?.trim().toLowerCase() === "us"
+  );
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const servicesParam = urlParams.get("services");
     const packageParam = urlParams.get("package");
+    const editRestId = urlParams.get("editRestaurantId");
+    if (editRestId) {
+      setEditRestaurantId(editRestId);
+      setIsLiveRestaurantEdit(true);
+      (async () => {
+        try {
+          const authSession = getAuthSession();
+          const supabaseSession = await supabase.auth.getSession();
+          const token = authSession.accessToken || supabaseSession.data.session?.access_token || "";
+
+          let restData: any = null;
+          if (token) {
+            const res = await getRestaurantDetails(token, editRestId);
+            if (res.ok && res.data) {
+              restData = res.data;
+            }
+          }
+          if (!restData) {
+            // Client-side direct query fallback
+            const { data: directData } = await supabase
+              .from("restaurants")
+              .select("*")
+              .eq("id", editRestId)
+              .maybeSingle();
+            if (directData) {
+              restData = directData;
+            }
+          }
+
+          if (restData) {
+            if (!restData.fullname && !restData.owner_name) {
+              const oInfo = restData.other_info && typeof restData.other_info === "object" ? restData.other_info : {};
+              if (oInfo.fullname || oInfo.owner_name) {
+                restData.fullname = oInfo.fullname || oInfo.owner_name;
+              } else {
+                try {
+                  const { data: prof } = await supabase
+                    .from("profiles")
+                    .select("username, first_name, last_name, email")
+                    .or(`restaurant_id.eq.${editRestId},email.eq.${restData.email}`)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  if (prof) {
+                    const combined = [prof.first_name, prof.last_name].filter(Boolean).join(" ");
+                    restData.fullname = combined || prof.username || "";
+                  }
+                } catch (e) {}
+              }
+            }
+
+            const rest: any = restData;
+            let addrObj: any = {};
+            if (typeof rest.raw_address === "object" && rest.raw_address !== null) {
+              addrObj = rest.raw_address;
+            } else if (typeof rest.raw_address === "string") {
+              try { addrObj = JSON.parse(rest.raw_address); } catch {}
+            }
+
+            if (Object.keys(addrObj).length === 0) {
+              if (typeof rest.address === "object" && rest.address !== null) {
+                addrObj = rest.address;
+              } else if (typeof rest.address === "string") {
+                const trimmed = rest.address.trim();
+                if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                  try { addrObj = JSON.parse(trimmed); } catch {}
+                }
+              }
+            }
+
+            let lat = "";
+            let lng = "";
+            if (addrObj.latitude !== undefined && addrObj.latitude !== null && addrObj.latitude !== "") {
+              lat = String(addrObj.latitude);
+            }
+            if (addrObj.longitude !== undefined && addrObj.longitude !== null && addrObj.longitude !== "") {
+              lng = String(addrObj.longitude);
+            }
+            if ((!lat || !lng) && rest.mapEmbedUrl && rest.mapEmbedUrl.includes("[")) {
+              try {
+                const coords = JSON.parse(rest.mapEmbedUrl);
+                if (Array.isArray(coords) && coords.length === 2) {
+                  lat = String(coords[0]);
+                  lng = String(coords[1]);
+                }
+              } catch (e) {}
+            }
+
+            const buildingno =
+              addrObj.address_line_1 ||
+              addrObj.buildingno ||
+              (typeof rest.address === "string" && !rest.address.startsWith("{") ? rest.address.split(",")[0]?.trim() : "") ||
+              "";
+
+            const floor = addrObj.address_line_2 || addrObj.floor || "";
+            const area =
+              addrObj.area ||
+              (addrObj.address_line_2 && addrObj.address_line_2 !== floor ? addrObj.address_line_2 : "") ||
+              (typeof rest.address === "string" && !rest.address.startsWith("{") && rest.address.includes(",") ? rest.address.split(",")[1]?.trim() : "") ||
+              buildingno;
+
+            const city =
+              addrObj.city ||
+              (typeof rest.address === "string" && !rest.address.startsWith("{") && rest.address.includes(",") ? rest.address.split(",")[2]?.trim() : "Hyderabad");
+
+            const pincode =
+              addrObj.pincode ||
+              (typeof rest.address === "string" ? rest.address.match(/\b\d{6}\b/)?.[0] || "" : "");
+
+            const landmark = addrObj.landmark || "";
+            const state = addrObj.state || "Telangana";
+            const country = addrObj.country || "India";
+
+            const otherInfo = rest.other_info && typeof rest.other_info === "object" ? rest.other_info : {};
+
+            setFormData((prev) => ({
+              ...prev,
+              fullname: rest.fullname || rest.owner_name || otherInfo.fullname || otherInfo.owner_name || (rest.creator_name ? rest.creator_name : "") || prev.fullname,
+              restaurant_name: rest.restaurant_name || prev.restaurant_name,
+              email: rest.email || prev.email,
+              phone: rest.contact ? String(rest.contact).slice(-10) : prev.phone,
+              restaurant_primary_contact: rest.contact ? String(rest.contact).slice(-10) : prev.restaurant_primary_contact,
+              buildingno: buildingno || prev.buildingno,
+              floor: floor || prev.floor,
+              area: area || prev.area,
+              city: city || prev.city,
+              state: state || prev.state,
+              country: country || prev.country,
+              pincode: pincode || prev.pincode,
+              landmark: landmark || prev.landmark,
+              address_line_1: addrObj.address_line_1 || prev.address_line_1,
+              address_line_2: addrObj.address_line_2 || prev.address_line_2,
+              latitude: lat || prev.latitude,
+              longitude: lng || prev.longitude,
+              cuisines: Array.isArray(rest.cuisines) && rest.cuisines.length > 0 ? rest.cuisines : prev.cuisines,
+              services: Array.isArray(rest.services) && rest.services.length > 0 ? (rest.services as ServiceType[]) : prev.services,
+              pan_number: rest.pan_number || otherInfo.pan_number || prev.pan_number,
+              fullnameaspan: rest.fullnameaspan || otherInfo.fullnameaspan || prev.fullnameaspan,
+              registered_business_address: rest.registered_business_address || otherInfo.registered_business_address || prev.registered_business_address,
+              gst: Boolean(rest.gst_number),
+              gst_number: rest.gst_number || prev.gst_number,
+              fssai_number: rest.fssai_number || otherInfo.fssai_number || prev.fssai_number,
+              fssai_expiry: rest.fssai_expiry || otherInfo.fssai_expiry || prev.fssai_expiry,
+              bank_accno: rest.bank_accno || otherInfo.bank_accno || prev.bank_accno,
+              bank_accno_confirm: rest.bank_accno || otherInfo.bank_accno || prev.bank_accno_confirm,
+              ifsc_code: rest.ifsc_code || otherInfo.ifsc_code || prev.ifsc_code,
+              account_type: (rest.account_type || otherInfo.account_type || prev.account_type || "savings") as AccountType,
+            }));
+
+            if (rest.domain_url) setDomainUrl(rest.domain_url);
+            if (rest.pos_domain) setPosDomain(rest.pos_domain);
+            if (rest.package) setPackageName(rest.package);
+
+            setPreviewImages((prev) => ({
+              ...prev,
+              ...(rest.logo_url ? { logo_url: rest.logo_url } : {}),
+              ...(rest.background_image_url ? { background_image_url: rest.background_image_url } : {}),
+              ...(rest.pan_card_url || otherInfo.pan_card_url ? { pan_card: rest.pan_card_url || otherInfo.pan_card_url } : {}),
+              ...(rest.gst_certificate_url || otherInfo.gst_certificate_url ? { gst_certificate: rest.gst_certificate_url || otherInfo.gst_certificate_url } : {}),
+              ...(rest.fssai_license_url || otherInfo.fssai_license_url ? { fssai_license: rest.fssai_license_url || otherInfo.fssai_license_url } : {}),
+            }));
+          }
+        } catch (err) {
+          console.warn("Could not load restaurant details for editing:", err);
+        }
+      })();
+    }
+
+    const editId = urlParams.get("editApplicationId");
+    if (editId) {
+      setEditAppId(editId);
+      (async () => {
+        try {
+          const authSession = getAuthSession();
+          const supabaseSession = await supabase.auth.getSession();
+          const token = authSession.accessToken || supabaseSession.data.session?.access_token || "";
+          if (token) {
+            const res = await getMyOnboardingApplication(token);
+            if (res.ok && res.data) {
+              const app = res.data;
+              let lat = "";
+              let lng = "";
+              if (app.mapEmbedUrl && app.mapEmbedUrl.includes("[")) {
+                try {
+                  const coords = JSON.parse(app.mapEmbedUrl);
+                  if (Array.isArray(coords) && coords.length === 2) {
+                    lat = String(coords[0]);
+                    lng = String(coords[1]);
+                  }
+                } catch (e) {}
+              }
+              setFormData((prev) => ({
+                ...prev,
+                restaurant_name: app.restaurant_name || prev.restaurant_name,
+                fullname: app.owner_name || prev.fullname,
+                email: app.email || prev.email,
+                phone: app.phone ? app.phone.slice(-10) : prev.phone,
+                restaurant_primary_contact: app.restaurant_primary_contact ? app.restaurant_primary_contact.slice(-10) : prev.restaurant_primary_contact,
+                buildingno: (app.address as any)?.buildingno || (app.address as any)?.address_line1 || prev.buildingno,
+                area: (app.address as any)?.area || prev.area,
+                city: (app.address as any)?.city || prev.city,
+                pincode: (app.address as any)?.pincode || prev.pincode,
+                landmark: (app.address as any)?.landmark || prev.landmark,
+                latitude: lat || prev.latitude,
+                longitude: lng || prev.longitude,
+                cuisines: Array.isArray(app.cuisines) && app.cuisines.length > 0 ? app.cuisines : prev.cuisines,
+                services: Array.isArray(app.services) && app.services.length > 0 ? (app.services as ServiceType[]) : prev.services,
+                pan_number: (app.legal as any)?.pan_number || prev.pan_number,
+                fullnameaspan: (app.legal as any)?.fullnameaspan || prev.fullnameaspan,
+                gst: Boolean((app.legal as any)?.gst_number),
+                gst_number: (app.legal as any)?.gst_number || prev.gst_number,
+                fssai_number: (app.legal as any)?.fssai_number || prev.fssai_number,
+                fssai_expiry: (app.legal as any)?.fssai_expiry || prev.fssai_expiry,
+                bank_accno: (app.bank as any)?.bank_accno || prev.bank_accno,
+                bank_accno_confirm: (app.bank as any)?.bank_accno || prev.bank_accno_confirm,
+                ifsc_code: (app.bank as any)?.ifsc_code || prev.ifsc_code,
+                account_type: ((app.bank as any)?.account_type || prev.account_type || "savings") as AccountType,
+                registered_business_address: (app.legal as any)?.address || prev.registered_business_address,
+              }));
+              if (app.package) {
+                setPackageName(app.package);
+              }
+              setPreviewImages((prev) => ({
+                ...prev,
+                ...((app as any).logo_url ? { logo_url: (app as any).logo_url } : {}),
+                ...((app as any).background_image_url ? { background_image_url: (app as any).background_image_url } : {}),
+                ...((app.legal as any)?.pan_card_url ? { pan_card: (app.legal as any).pan_card_url } : {}),
+                ...((app.legal as any)?.gst_certificate_url ? { gst_certificate: (app.legal as any).gst_certificate_url } : {}),
+                ...((app.legal as any)?.fssai_license_url ? { fssai_license: (app.legal as any).fssai_license_url } : {}),
+              }));
+            }
+          }
+        } catch (e) {
+          console.warn("Could not load application details for editing:", e);
+        }
+      })();
+    }
     setPackageName(packageParam)
     if (servicesParam) {
       const servicesArray = servicesParam.split(",").filter((service) => service.trim() !== "");
@@ -629,16 +975,44 @@ export default function OnboardingForm() {
     if (!formData.buildingno.trim()) newErrors.buildingno = "Building/Shop number required";
     if (!formData.area.trim()) newErrors.area = "Area required";
     if (!formData.city.trim()) newErrors.city = "City required";
-    // if (!formData.state) newErrors.state = "State required";
-    if (!formData.pincode.match(/^\d{6}$/)) newErrors.pincode = "Valid 6-digit pincode required";
-    if (!formData.latitude || !formData.longitude) newErrors.location = "Please set location on map";
+
+    const isUS =
+      formData.country?.toLowerCase().includes("united states") ||
+      formData.country?.toLowerCase().includes("usa") ||
+      formData.country?.toLowerCase() === "us";
+
+    const cleanedPincode = formData.pincode.trim();
+    if (!cleanedPincode) {
+      newErrors.pincode = isUS ? "ZIP code required" : "Postal / PIN code required";
+    } else if (isUS) {
+      if (!/^\d{5}(-\d{4})?$/.test(cleanedPincode)) {
+        newErrors.pincode = "Valid 5-digit US ZIP code required (e.g. 95630)";
+      }
+    } else {
+      if (!/^\d{5,6}(-\d{4})?$/.test(cleanedPincode)) {
+        newErrors.pincode = "Valid postal / PIN code required (e.g. 500072 or 95630)";
+      }
+    }
+
+    const hasValidCoords =
+      formData.latitude &&
+      formData.longitude &&
+      !isNaN(parseFloat(formData.latitude)) &&
+      !isNaN(parseFloat(formData.longitude)) &&
+      parseFloat(formData.latitude) !== 0 &&
+      parseFloat(formData.longitude) !== 0;
+
+    if (!hasValidCoords) {
+      newErrors.location = "Restaurant map location (latitude & longitude) is missing! Please click 'Use My Location', search your address, or click on the map to pin your location.";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const validateStep2 = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.logo_url) newErrors.logo_url = "Please upload restaurant logo";
+    if (!formData.logo_url && !previewImages.logo_url) newErrors.logo_url = "Please upload restaurant logo";
     if (formData.cuisines.length === 0) newErrors.cuisines = "Select at least 1 cuisine";
     if (formData.cuisines.length > 3) newErrors.cuisines = "Maximum 3 cuisines allowed";
     // Services are now auto-set, so no validation needed for them here
@@ -648,43 +1022,83 @@ export default function OnboardingForm() {
 
   const validateStep3 = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.pan_number.match(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)) {
-      newErrors.pan_number = "Valid PAN required (e.g., ABCDE1234F)";
-    }
-    if (!formData.fullnameaspan.trim()) newErrors.fullnameaspan = "Full name as per PAN required";
-    if (!formData.registered_business_address.trim())
-      newErrors.registered_business_address = "Registered business address required";
-    if (!formData.pan_card) newErrors.pan_card = "PAN card document required";
-    if (formData.gst) {
-      if (!formData.gst_number.match(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/)) {
-        newErrors.gst_number = "Valid GST number required";
+
+    if (!isUS) {
+      if (!formData.pan_number.match(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)) {
+        newErrors.pan_number = "Valid PAN required (e.g., ABCDE1234F)";
       }
-      if (!formData.gst_certificate) newErrors.gst_certificate = "GST certificate required";
+      if (!formData.fullnameaspan.trim()) newErrors.fullnameaspan = "Full name as per PAN required";
+      if (!formData.registered_business_address.trim())
+        newErrors.registered_business_address = "Registered business address required";
+      if (!formData.pan_card && !previewImages.pan_card) newErrors.pan_card = "PAN card document required";
+      if (formData.gst) {
+        if (!formData.gst_number.match(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/)) {
+          newErrors.gst_number = "Valid GST number required";
+        }
+        if (!formData.gst_certificate && !previewImages.gst_certificate) newErrors.gst_certificate = "GST certificate required";
+      }
+      if (!formData.fssai_number.trim()) newErrors.fssai_number = "FSSAI number required";
+      if (!formData.fssai_expiry) newErrors.fssai_expiry = "FSSAI expiry date required";
+      if (!formData.fssai_license && !previewImages.fssai_license) newErrors.fssai_license = "FSSAI certificate required";
+      if (!formData.ifsc_code.match(/^[A-Z]{4}0[A-Z0-9]{6}$/)) {
+        newErrors.ifsc_code = "Valid IFSC code required";
+      }
+    } else {
+      // US Establishments: PAN, GST, FSSAI certificates & numbers are completely optional!
+      // Routing Number (ABA) validation: exactly 9 digits
+      const routing = formData.ifsc_code.trim();
+      if (!routing) {
+        newErrors.ifsc_code = "9-digit ABA Routing number required";
+      } else if (!/^\d{9}$/.test(routing)) {
+        newErrors.ifsc_code = "Routing number must be exactly 9 digits";
+      }
     }
-    if (!formData.fssai_number.trim()) newErrors.fssai_number = "FSSAI number required";
-    if (!formData.fssai_expiry) newErrors.fssai_expiry = "FSSAI expiry date required";
-    if (!formData.fssai_license) newErrors.fssai_license = "FSSAI certificate required";
-    if (!formData.bank_accno.match(/^\d{9,18}$/)) newErrors.bank_accno = "Valid account number required";
+
+    if (!formData.bank_accno.match(/^\d{8,18}$/)) newErrors.bank_accno = "Valid account number required";
     if (formData.bank_accno !== formData.bank_accno_confirm) {
       newErrors.bank_accno_confirm = "Account numbers do not match";
     }
-    if (!formData.ifsc_code.match(/^[A-Z]{4}0[A-Z0-9]{6}$/)) {
-      newErrors.ifsc_code = "Valid IFSC code required";
-    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleNext = () => {
     let isValid = false;
-    if (currentStep === 1) isValid = validateStep1();
-    else if (currentStep === 2) isValid = validateStep2();
-    else if (currentStep === 3) isValid = validateStep3();
+    if (currentStep === 1) {
+      isValid = validateStep1();
+      if (!isValid) {
+        const hasValidCoords =
+          formData.latitude &&
+          formData.longitude &&
+          !isNaN(parseFloat(formData.latitude)) &&
+          !isNaN(parseFloat(formData.longitude)) &&
+          parseFloat(formData.latitude) !== 0 &&
+          parseFloat(formData.longitude) !== 0;
+
+        if (!hasValidCoords) {
+          toast.error("Location Missing: Please pin your restaurant location on the map, click 'Use My Location', or search your area.", { duration: 6000 });
+        } else {
+          toast.error("Please fill all required restaurant & address fields.");
+        }
+      }
+    } else if (currentStep === 2) {
+      isValid = validateStep2();
+      if (!isValid) toast.error("Please upload logo and select cuisines");
+    } else if (currentStep === 3) {
+      isValid = validateStep3();
+      if (!isValid) {
+        toast.error(
+          isUS
+            ? "Please provide valid bank account & routing details"
+            : "Please complete all required legal documents and bank details"
+        );
+      }
+    }
+
     if (isValid) {
-      setCurrentStep((prev) => Math.min(prev + 1, 3));
+      setCurrentStep((prev) => Math.min(prev + 1, totalSteps));
       window.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      toast.error("Please fill all required fields correctly");
     }
   };
 
@@ -717,12 +1131,28 @@ export default function OnboardingForm() {
     if (current.includes(cuisine)) {
       updateField("cuisines", current.filter((c) => c !== cuisine));
     } else {
-      if (current.length < 3) {
+      if (current.length < 5) {
         updateField("cuisines", [...current, cuisine]);
       } else {
-        toast.error("Maximum 3 cuisines allowed");
+        toast.error("Maximum 5 cuisines allowed");
       }
     }
+  };
+
+  const addCustomCuisine = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = customCuisineInput.trim();
+    if (!trimmed) return;
+    if (formData.cuisines.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      toast.error("Cuisine already selected");
+      return;
+    }
+    if (formData.cuisines.length >= 5) {
+      toast.error("Maximum 5 cuisines allowed");
+      return;
+    }
+    updateField("cuisines", [...formData.cuisines, trimmed]);
+    setCustomCuisineInput("");
   };
 
   // For custom timings, we need functions to add/remove time slots per day
@@ -798,10 +1228,15 @@ export default function OnboardingForm() {
 
   const handleAddressResolved = (address: ResolvedAddress) => {
     if (address.buildingno) updateField("buildingno", address.buildingno);
+    if (address.floor) updateField("floor", address.floor);
     if (address.area) updateField("area", address.area);
     if (address.city) updateField("city", address.city);
-    if (address.pincode) updateField("pincode", address.pincode.replace(/\D/g, "").slice(0, 6));
+    if (address.state) updateField("state", address.state);
+    if (address.country) updateField("country", address.country);
+    if (address.pincode) updateField("pincode", address.pincode.trim().slice(0, 10));
     if (address.landmark) updateField("landmark", address.landmark);
+    if (address.address_line_1) updateField("address_line_1", address.address_line_1);
+    if (address.address_line_2) updateField("address_line_2", address.address_line_2);
   };
 
   const handleSubmit = async () => {
@@ -936,6 +1371,178 @@ export default function OnboardingForm() {
       if (formData.gst_certificate) registrationForm.append("gst_certificate", formData.gst_certificate);
       if (formData.fssai_license) registrationForm.append("fssai_license", formData.fssai_license);
 
+      const structuredAddressObj = {
+        address_line_1:
+          formData.address_line_1 ||
+          formData.registered_business_address ||
+          [formData.buildingno, formData.area, formData.city].filter(Boolean).join(", ").trim(),
+        address_line_2:
+          formData.address_line_2 ||
+          formData.floor ||
+          formData.area ||
+          "",
+        landmark: formData.landmark || "",
+        city: formData.city || "",
+        state: formData.state || "Telangana",
+        country: formData.country || "India",
+        pincode: formData.pincode || "",
+        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+      };
+      const structuredAddressStr = JSON.stringify(structuredAddressObj);
+
+      const isStaffOrAdmin = userRole === "super_admin" || userRole === "staff";
+
+      const regBusinessAddr =
+        formData.registered_business_address?.trim() ||
+        (isUS
+          ? [formData.buildingno, formData.area, formData.city, formData.state, formData.pincode, formData.country]
+              .filter(Boolean)
+              .join(", ")
+          : undefined);
+
+      if (editRestaurantId) {
+        // Customer, Staff, or Super Admin updating existing restaurant
+        const updatePayload: Record<string, any> = {
+          restaurant_name: formData.restaurant_name.trim(),
+          fullname: formData.fullname.trim(),
+          owner_name: formData.fullname.trim(),
+          contact: formData.same_as_owner
+            ? `${formData.phone_country_code}${formData.phone}`
+            : `${formData.primary_country_code}${formData.restaurant_primary_contact}`,
+          email: formData.email.trim(),
+          address: structuredAddressStr,
+          latitude: structuredAddressObj.latitude,
+          longitude: structuredAddressObj.longitude,
+          package: normalizedPackage,
+          services: formData.services.map((s) => s.toLowerCase()),
+          cuisines: formData.cuisines,
+          timings: { hours: restaurantHours },
+          gst_number: formData.gst ? formData.gst_number : undefined,
+          fssai_number: formData.fssai_number || undefined,
+          fssai_expiry: formData.fssai_expiry || undefined,
+          pan_number: formData.pan_number || undefined,
+          fullnameaspan: formData.fullnameaspan || undefined,
+          registered_business_address: regBusinessAddr,
+          bank_accno: formData.bank_accno || undefined,
+          ifsc_code: formData.ifsc_code || undefined,
+          account_type: formData.account_type || undefined,
+          other_info: {
+            fullname: formData.fullname.trim(),
+            owner_name: formData.fullname.trim(),
+            pan_number: formData.pan_number || "",
+            fullnameaspan: formData.fullnameaspan || "",
+            registered_business_address: regBusinessAddr || "",
+            fssai_expiry: formData.fssai_expiry || "",
+            bank_accno: formData.bank_accno || "",
+            ifsc_code: formData.ifsc_code || "",
+            routing_number: isUS ? formData.ifsc_code : "",
+            account_type: formData.account_type || (isUS ? "checking" : "savings"),
+          },
+        };
+
+        // Super Admin can also update custom routing domains
+        if (userRole === "super_admin") {
+          if (domainUrl && domainUrl.trim()) updatePayload.domain_url = domainUrl.trim();
+          if (posDomain && posDomain.trim()) updatePayload.pos_domain = posDomain.trim();
+        }
+
+        const updateForm = new FormData();
+        updateForm.append("accessToken", accessToken || sessionAccessToken);
+        updateForm.append("restaurantId", editRestaurantId);
+        updateForm.append("payload", JSON.stringify(updatePayload));
+        if (formData.logo_url) updateForm.append("logo_url", formData.logo_url);
+        if (formData.background_image_url) updateForm.append("background_image_url", formData.background_image_url);
+        if (formData.pan_card) updateForm.append("pan_card", formData.pan_card);
+        if (formData.gst_certificate) updateForm.append("gst_certificate", formData.gst_certificate);
+        if (formData.fssai_license) updateForm.append("fssai_license", formData.fssai_license);
+
+        const updateRes = await updateRestaurantWithFormData(updateForm);
+        if (!updateRes.ok) throw new Error(updateRes.error || "Failed to update restaurant.");
+
+        toast.dismiss(loadingToast);
+        toast.success(`Restaurant "${formData.restaurant_name}" updated successfully!`);
+        window.location.href = "/dashboard";
+        return;
+      }
+
+      if (isStaffOrAdmin) {
+        // Direct restaurant creation for staff & super_admin
+        const directPayload = {
+          restaurant_name: formData.restaurant_name.trim(),
+          domain_url: (domainUrl || defaultDomainUrl).trim(),
+          pos_domain: (posDomain || defaultPosDomain).trim(),
+          email: formData.email ? formData.email.trim() : undefined,
+          fullname: formData.fullname ? formData.fullname.trim() : undefined,
+          contact: formData.same_as_owner
+            ? `${formData.phone_country_code}${formData.phone}`
+            : `${formData.primary_country_code}${formData.restaurant_primary_contact}`,
+          address: structuredAddressStr,
+          latitude: structuredAddressObj.latitude,
+          longitude: structuredAddressObj.longitude,
+          package: normalizedPackage,
+          services: formData.services.map((s) => s.toLowerCase()),
+          cuisines: formData.cuisines,
+          timings: { hours: restaurantHours },
+          gst_number: formData.gst ? formData.gst_number : undefined,
+          fssai_number: formData.fssai_number || undefined,
+          fssai_expiry: formData.fssai_expiry || undefined,
+          pan_number: formData.pan_number || undefined,
+          fullnameaspan: formData.fullnameaspan || undefined,
+          registered_business_address: regBusinessAddr,
+          bank_accno: formData.bank_accno || undefined,
+          ifsc_code: formData.ifsc_code || undefined,
+          account_type: formData.account_type || undefined,
+          other_info: {
+            fullname: formData.fullname ? formData.fullname.trim() : "",
+            owner_name: formData.fullname ? formData.fullname.trim() : "",
+            pan_number: formData.pan_number || "",
+            fullnameaspan: formData.fullnameaspan || "",
+            registered_business_address: regBusinessAddr || "",
+            fssai_expiry: formData.fssai_expiry || "",
+            bank_accno: formData.bank_accno || "",
+            ifsc_code: formData.ifsc_code || "",
+            routing_number: isUS ? formData.ifsc_code : "",
+            account_type: formData.account_type || (isUS ? "checking" : "savings"),
+          },
+        };
+
+        const directForm = new FormData();
+        directForm.append("accessToken", accessToken || sessionAccessToken);
+        directForm.append("payload", JSON.stringify(directPayload));
+        if (formData.logo_url) directForm.append("logo_url", formData.logo_url);
+        if (formData.background_image_url) directForm.append("background_image_url", formData.background_image_url);
+        if (formData.pan_card) directForm.append("pan_card", formData.pan_card);
+        if (formData.gst_certificate) directForm.append("gst_certificate", formData.gst_certificate);
+        if (formData.fssai_license) directForm.append("fssai_license", formData.fssai_license);
+
+        const createRes = await createRestaurantWithFormData(directForm);
+        if (!createRes.ok) throw new Error(createRes.error || "Failed to create restaurant directly.");
+
+        toast.dismiss(loadingToast);
+        if (createRes.data?.adminPassword) {
+          toast.success(`Restaurant created! Admin account for ${formData.email}: Password is "${createRes.data.adminPassword}"`, { duration: 9000 });
+        } else {
+          toast.success(`Restaurant "${formData.restaurant_name}" created directly!`);
+        }
+        setTimeout(() => {
+          window.location.href = "/dashboard";
+        }, 1800);
+        return;
+      }
+
+      if (editAppId) {
+        registrationForm.append("applicationId", editAppId);
+        registrationForm.append("accessToken", accessToken || sessionAccessToken);
+        const updateRes = await updateMyOnboardingApplicationWithFormData(registrationForm);
+        if (!updateRes.ok) throw new Error(updateRes.error || "Failed to update application.");
+
+        toast.dismiss(loadingToast);
+        toast.success("Application updated successfully.");
+        window.location.href = "/dashboard";
+        return;
+      }
+
       const result = await submitOnboardingApplication(registrationForm);
       if (!result.ok) throw new Error(result.error);
       toast.dismiss(loadingToast);
@@ -953,16 +1560,58 @@ export default function OnboardingForm() {
     }
   };
 
-  const progressPercent = (currentStep / 3) * 100;
+  const isStaffOrAdmin = userRole === "super_admin" || userRole === "staff";
+  const totalSteps = isStaffOrAdmin ? 4 : 3;
+  const progressPercent = (currentStep / totalSteps) * 100;
+  const cleanSlug = formData.restaurant_name
+    ? formData.restaurant_name.toLowerCase().replace(/[^a-z0-9]/g, "").trim()
+    : "";
+  const defaultPosDomain = cleanSlug ? `pos.marinate360.com` : "pos.marinate360.com";
+  const defaultDomainUrl = cleanSlug ? `${cleanSlug}.marinate360.com` : "menu.marinate360.com";
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <Toaster position="top-center" />
       <div className="mx-auto">
+        {/* Top Navigation - Clean Button with Shadow, no card */}
+        <div className="flex items-center justify-between mb-4">
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 hover:text-orange-600 hover:border-orange-300 transition cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Dashboard</span>
+          </button>
+          <span className="text-xs font-semibold text-gray-500">
+            {editRestaurantId
+              ? "Restaurant Management • Profile Configuration"
+              : editAppId
+              ? "Application Management • Review & Edit"
+              : userRole === "super_admin"
+              ? "Executive Management • Direct Registration"
+              : userRole === "staff"
+              ? "Operations Portal • Direct Registration"
+              : "Partner Registration Portal"}
+          </span>
+        </div>
+
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Complete your registration</h1>
-          <p className="text-gray-600 mb-4">Let&apos;s get your restaurant online</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            {editRestaurantId
+              ? "Update Restaurant Information"
+              : editAppId
+              ? "Update Application Details"
+              : "Restaurant Registration"}
+          </h1>
+          <p className="text-gray-600 mb-4">
+            {editRestaurantId
+              ? "Review and configure operational details, compliance documents, and platform routing."
+              : editAppId
+              ? "Modify your submitted onboarding application details for verification."
+              : "Complete the steps below to onboard and configure your restaurant on the platform."}
+          </p>
           {/* Progress Bar */}
           <div className="mt-4 bg-gray-200 rounded-full h-2 overflow-hidden">
             <div
@@ -1026,16 +1675,41 @@ export default function OnboardingForm() {
                 >
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                      currentStep === 3 ? "bg-orange-500 text-white" : "bg-gray-200 text-gray-600"
+                      currentStep === 3
+                        ? "bg-orange-500 text-white"
+                        : currentStep > 3
+                        ? "bg-green-500 text-white"
+                        : "bg-gray-200 text-gray-600"
                     }`}
                   >
-                    3
+                    {currentStep > 3 ? "✓" : "3"}
                   </div>
                   <div>
-                    <div className="font-semibold text-gray-900">Legal Documents</div>
-                    <div className="text-xs text-gray-600 mt-1">PAN, GST, FSSAI & Bank</div>
+                    <div className="font-semibold text-gray-900">{isUS ? "Business & Banking" : "Legal Documents"}</div>
+                    <div className="text-xs text-gray-600 mt-1">{isUS ? "Tax & Banking Details" : "PAN, GST, FSSAI & Bank"}</div>
                   </div>
                 </div>
+
+                {/* Step 4 for Staff & Super Admin */}
+                {isStaffOrAdmin && (
+                  <div
+                    className={`flex items-start gap-4 p-4 rounded-xl transition ${
+                      currentStep === 4 ? "bg-orange-50 border-l-4 border-orange-500" : "bg-gray-50"
+                    }`}
+                  >
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+                        currentStep === 4 ? "bg-orange-500 text-white" : "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      4
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-900">Platform & Domains</div>
+                      <div className="text-xs text-gray-600 mt-1">POS & Food Ordering URLs</div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1088,17 +1762,40 @@ export default function OnboardingForm() {
                         {errors.fullname && <p className="text-red-500 text-sm mt-1">{errors.fullname}</p>}
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          Email Address <span className="text-red-500">*</span>
-                        </label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-semibold text-gray-700">
+                            Owner Email Address <span className="text-red-500">*</span>
+                          </label>
+                          {(userRole === "super_admin" || userRole === "staff") && (
+                            <span className="text-[11px] font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md border border-orange-200">
+                              Admin Account Creation
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="email"
                           value={formData.email}
-                          readOnly
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-0 focus:border-gray-300 bg-gray-300"
-                          placeholder="your@gmail.com"
+                          readOnly={userRole !== "super_admin" && userRole !== "staff"}
+                          onChange={(e) => updateField("email", e.target.value)}
+                          className={`w-full px-4 py-3 border rounded-lg text-sm transition ${
+                            errors.email ? "border-red-500" : "border-gray-300"
+                          } ${
+                            userRole !== "super_admin" && userRole !== "staff"
+                              ? "bg-gray-100 text-gray-500 cursor-not-allowed"
+                              : "bg-white text-gray-900 focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          }`}
+                          placeholder={
+                            userRole === "super_admin" || userRole === "staff"
+                              ? "Enter restaurant owner's email address *"
+                              : "your@gmail.com"
+                          }
                         />
                         {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
+                        {(userRole === "super_admin" || userRole === "staff") && (
+                          <p className="text-xs text-orange-700/80 mt-1 font-medium">
+                            An Admin account with an auto-generated password will be provisioned directly for this email.
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="mt-5">
@@ -1196,7 +1893,23 @@ export default function OnboardingForm() {
                           : null
                       }
                     />
-                    {errors.location && <p className="text-red-500 text-sm mt-2">{errors.location}</p>}
+                    {errors.location && (
+                      <div className="mt-2.5 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-semibold animate-pulse">
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>{errors.location}</span>
+                      </div>
+                    )}
+                    {formData.latitude && formData.longitude && parseFloat(formData.latitude) !== 0 ? (
+                      <div className="mt-2.5 flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700 font-medium">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Restaurant map coordinates captured automatically!</span>
+                      </div>
+                    ) : (
+                      <div className="mt-2.5 flex items-center gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 font-medium">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Please set your restaurant location on the map, use &apos;Use My Location&apos;, or search your address.</span>
+                      </div>
+                    )}
                     <div className="mt-8">
                       <h4 className="font-semibold text-gray-900 mb-4">Address Details</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1272,11 +1985,17 @@ export default function OnboardingForm() {
                           <input
                             type="text"
                             value={formData.pincode}
-                            onChange={(e) => updateField("pincode", e.target.value.replace(/\D/g, "").slice(0, 6))}
+                            onChange={(e) => updateField("pincode", e.target.value.replace(/[^0-9-]/g, "").slice(0, 10))}
                             className={`w-full px-4 py-3 border ${
                               errors.pincode ? "border-red-500" : "border-gray-300"
                             } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent`}
-                            placeholder="Pincode *"
+                            placeholder={
+                              formData.country?.toLowerCase().includes("united states") ||
+                              formData.country?.toLowerCase().includes("usa") ||
+                              formData.country?.toLowerCase() === "us"
+                                ? "ZIP Code *"
+                                : "PIN / ZIP Code *"
+                            }
                           />
                           {errors.pincode && <p className="text-red-500 text-sm mt-1">{errors.pincode}</p>}
                         </div>
@@ -1292,6 +2011,8 @@ export default function OnboardingForm() {
                       </div>
                     </div>
                   </div>
+
+
                 </div>
               )}
               {/* STEP 2: Operational Details */}
@@ -1305,15 +2026,26 @@ export default function OnboardingForm() {
                         <label className="block text-sm font-semibold text-gray-700 mb-3">
                           Restaurant Logo *
                         </label>
-                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                          <input
-                            type="file"
-                            onChange={(e) => handleFileUpload("logo_url", e)}
-                            accept="image/jpeg,image/jpg,image/png"
-                            className="hidden"
-                            id="logo-upload"
-                          />
-                          <label htmlFor="logo-upload" className="cursor-pointer">
+                        {isLiveRestaurantEdit && (
+                        <div className="flex items-center gap-2 p-2.5 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-medium">
+                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Logo is locked for active restaurants.</span>
+                        </div>
+                      )}
+                      <div className={`border-2 border-dashed rounded-xl p-8 text-center transition ${
+                        isLiveRestaurantEdit
+                          ? "border-gray-200 bg-gray-50 cursor-not-allowed"
+                          : "border-gray-300 hover:border-orange-500 cursor-pointer"
+                      }`}>
+                        <input
+                          type="file"
+                          disabled={isLiveRestaurantEdit}
+                          onChange={(e) => handleFileUpload("logo_url", e)}
+                          accept="image/jpeg,image/jpg,image/png"
+                          className="hidden"
+                          id="logo-upload"
+                        />
+                        <label htmlFor={isLiveRestaurantEdit ? undefined : "logo-upload"} className={isLiveRestaurantEdit ? "cursor-not-allowed" : "cursor-pointer"}>
                             {previewImages.logo_url ? (
                               <img
                                 src={previewImages.logo_url as string}
@@ -1349,15 +2081,26 @@ export default function OnboardingForm() {
                         <label className="block text-sm font-semibold text-gray-700 mb-3">
                           Cover Image (Optional)
                         </label>
-                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                          <input
-                            type="file"
-                            onChange={(e) => handleFileUpload("background_image_url", e)}
-                            accept="image/jpeg,image/jpg,image/png"
-                            className="hidden"
-                            id="bg-upload"
-                          />
-                          <label htmlFor="bg-upload" className="cursor-pointer">
+                        {isLiveRestaurantEdit && (
+                        <div className="flex items-center gap-2 p-2.5 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-medium">
+                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Cover image is locked for active restaurants.</span>
+                        </div>
+                      )}
+                      <div className={`border-2 border-dashed rounded-xl p-8 text-center transition ${
+                        isLiveRestaurantEdit
+                          ? "border-gray-200 bg-gray-50 cursor-not-allowed"
+                          : "border-gray-300 hover:border-orange-500 cursor-pointer"
+                      }`}>
+                        <input
+                          type="file"
+                          disabled={isLiveRestaurantEdit}
+                          onChange={(e) => handleFileUpload("background_image_url", e)}
+                          accept="image/jpeg,image/jpg,image/png"
+                          className="hidden"
+                          id="bg-upload"
+                        />
+                        <label htmlFor={isLiveRestaurantEdit ? undefined : "bg-upload"} className={isLiveRestaurantEdit ? "cursor-not-allowed" : "cursor-pointer"}>
                             {previewImages.background_image_url ? (
                               <img
                                 src={previewImages.background_image_url as string}
@@ -1409,8 +2152,56 @@ export default function OnboardingForm() {
                         </button>
                       ))}
                     </div>
+
+                    {/* Custom cuisines tags */}
+                    {formData.cuisines.filter((c) => !CUISINES.includes(c)).length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        {formData.cuisines
+                          .filter((c) => !CUISINES.includes(c))
+                          .map((custom) => (
+                            <span
+                              key={custom}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600 text-white text-xs font-semibold shadow-xs"
+                            >
+                              <span>{custom}</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleCuisine(custom)}
+                                className="hover:text-zinc-200 text-sm ml-1"
+                              >
+                                &times;
+                              </button>
+                            </span>
+                          ))}
+                      </div>
+                    )}
+
+                    {/* Custom Cuisine Input */}
+                    <div className="mt-4 flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Add custom cuisine (e.g. Arabian Mandi, Mughlai, Bakery)..."
+                        value={customCuisineInput}
+                        onChange={(e) => setCustomCuisineInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addCustomCuisine();
+                          }
+                        }}
+                        className="flex-1 rounded-lg border border-gray-300 px-3.5 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-500 focus:outline-hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addCustomCuisine()}
+                        className="rounded-lg bg-orange-500 hover:bg-orange-600 px-5 py-2 text-sm font-semibold text-white shadow-xs transition"
+                      >
+                        Add
+                      </button>
+                    </div>
+
                     {errors.cuisines && <p className="text-red-500 text-sm mt-2">{errors.cuisines}</p>}
-                    <p className="text-sm text-gray-600 mt-3">Selected: {formData.cuisines.length}/3</p>
+                    <p className="text-sm text-gray-600 mt-3">Selected: {formData.cuisines.length} / 5 max</p>
                   </div>
                   {/* Restaurant Opening Hours */}
                   <div className="border-t pt-8">
@@ -1998,19 +2789,29 @@ export default function OnboardingForm() {
               {currentStep === 3 && (
                 <div className="space-y-8">
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Legal Documents</h2>
-                    <p className="text-gray-600 mb-6">Provide required documents for verification</p>
-                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-5 rounded-lg mb-6">
-                      <h4 className="font-semibold text-gray-900 mb-2">PAN Details</h4>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                      {isUS ? "Business & Regulatory Details" : "Legal Documents"}
+                    </h2>
+                    <p className="text-gray-600 mb-6 text-sm">
+                      {isUS
+                        ? "Configure business tax identification, optional health permits, and direct deposit details."
+                        : "Provide required statutory documents for verification and compliance."}
+                    </p>
+                    <div className={`${isUS ? "bg-blue-50 border-l-4 border-blue-500" : "bg-yellow-50 border-l-4 border-yellow-400"} p-5 rounded-lg mb-6`}>
+                      <h4 className="font-semibold text-gray-900 mb-2">
+                        {isUS ? "Tax & Business Identification (Optional)" : "PAN Details"}
+                      </h4>
                       <p className="text-sm text-gray-700">
-                        Enter the PAN details of the person or company who legally owns the restaurant
+                        {isUS
+                          ? "For US-based establishments, statutory Indian documents (PAN, GST, FSSAI) are optional. You may provide an EIN or State Tax ID if available."
+                          : "Enter the PAN details of the person or company who legally owns the restaurant"}
                       </p>
                     </div>
                     <div className="space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            PAN Number <span className="text-red-500">*</span>
+                            {isUS ? "EIN / Business Tax ID" : "PAN Number"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
                           <input
                             type="text"
@@ -2019,8 +2820,8 @@ export default function OnboardingForm() {
                             className={`w-full px-4 py-3 border ${
                               errors.pan_number ? "border-red-500" : "border-gray-300"
                             } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono uppercase`}
-                            placeholder="ABCDE1234F"
-                            maxLength={10}
+                            placeholder={isUS ? "12-3456789 (optional)" : "ABCDE1234F"}
+                            maxLength={isUS ? 12 : 10}
                           />
                           {errors.pan_number && (
                             <p className="text-red-500 text-sm mt-1">{errors.pan_number}</p>
@@ -2028,7 +2829,7 @@ export default function OnboardingForm() {
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Full Name as per PAN <span className="text-red-500">*</span>
+                            {isUS ? "Legal Business / Owner Name" : "Full Name as per PAN"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
                           <input
                             type="text"
@@ -2037,7 +2838,7 @@ export default function OnboardingForm() {
                             className={`w-full px-4 py-3 border ${
                               errors.fullnameaspan ? "border-red-500" : "border-gray-300"
                             } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent`}
-                            placeholder="Full name as per PAN"
+                            placeholder={isUS ? "Entity or owner legal name" : "Full name as per PAN"}
                           />
                           {errors.fullnameaspan && (
                             <p className="text-red-500 text-sm mt-1">{errors.fullnameaspan}</p>
@@ -2046,7 +2847,7 @@ export default function OnboardingForm() {
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          Registered Business Address <span className="text-red-500">*</span>
+                          Registered Business Address {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                         </label>
                         <textarea
                           value={formData.registered_business_address}
@@ -2054,7 +2855,7 @@ export default function OnboardingForm() {
                           className={`w-full px-4 py-3 border ${
                             errors.registered_business_address ? "border-red-500" : "border-gray-300"
                           } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent`}
-                          placeholder="Enter complete registered business address as per PAN"
+                          placeholder={isUS ? "Registered business address (optional)" : "Enter complete registered business address as per PAN"}
                           rows={3}
                         />
                         {errors.registered_business_address && (
@@ -2062,44 +2863,91 @@ export default function OnboardingForm() {
                         )}
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          Upload PAN Card <span className="text-red-500">*</span>
-                        </label>
-                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                          <input
-                            type="file"
-                            onChange={(e) => handleFileUpload("pan_card", e)}
-                            accept=".pdf,.jpg,.jpeg,.png"
-                            className="hidden"
-                            id="pan-upload"
-                          />
-                          <label htmlFor="pan-upload" className="cursor-pointer">
-                            <div className="flex flex-col items-center gap-3">
-                              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                                <svg
-                                  className="w-8 h-8 text-blue-500"
-                                  fill="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                              </div>
-                              {formData.pan_card ? (
-                                <div>
-                                  <p className="text-green-600 font-semibold">
-                                    ✓ {formData.pan_card.name}
-                                  </p>
-                                  <p className="text-sm text-gray-500 mt-1">Click to change</p>
-                                </div>
-                              ) : (
-                                <div>
-                                  <p className="text-gray-800 font-semibold">Upload PAN Card</p>
-                                  <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
-                                </div>
-                              )}
-                            </div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-semibold text-gray-700">
+                            {isUS ? "Tax Document / EIN Letter" : "PAN Card Document"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
+                          {isLiveRestaurantEdit && previewImages.pan_card && (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                              <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                              Verified & Locked
+                            </span>
+                          )}
                         </div>
+                        {isLiveRestaurantEdit && previewImages.pan_card ? (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                                <Shield className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">PAN Card Verified</p>
+                                <p className="text-xs text-gray-500">Document changes are locked for live restaurants</p>
+                              </div>
+                            </div>
+                            <a
+                              href={previewImages.pan_card}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 rounded-lg shadow-2xs hover:bg-emerald-50 transition cursor-pointer"
+                            >
+                              View Document
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
+                            <input
+                              type="file"
+                              onChange={(e) => handleFileUpload("pan_card", e)}
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              className="hidden"
+                              id="pan-upload"
+                            />
+                            <label htmlFor="pan-upload" className="cursor-pointer">
+                              <div className="flex flex-col items-center gap-3">
+                                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                                  <svg
+                                    className="w-8 h-8 text-blue-500"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                {formData.pan_card ? (
+                                  <div>
+                                    <p className="text-green-600 font-semibold">
+                                      ✓ {formData.pan_card.name}
+                                    </p>
+                                    <p className="text-sm text-gray-500 mt-1">Click to change</p>
+                                  </div>
+                                ) : previewImages.pan_card ? (
+                                  <div>
+                                    <p className="text-emerald-600 font-semibold">✓ Document Uploaded</p>
+                                    <div className="flex items-center justify-center gap-2 mt-1">
+                                      <a
+                                        href={previewImages.pan_card}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs text-blue-600 underline"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        View document
+                                      </a>
+                                      <span className="text-xs text-gray-400">•</span>
+                                      <span className="text-xs text-gray-500">Click to replace</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <p className="text-gray-800 font-semibold">{isUS ? "Upload Tax Document / EIN Letter" : "Upload PAN Card"}</p>
+                                    <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        )}
                         {errors.pan_card && <p className="text-red-500 text-sm mt-2">{errors.pan_card}</p>}
                       </div>
                     </div>
@@ -2161,46 +3009,93 @@ export default function OnboardingForm() {
                           )}
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Upload GST Certificate <span className="text-red-500">*</span>
-                          </label>
-                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                            <input
-                              type="file"
-                              onChange={(e) => handleFileUpload("gst_certificate", e)}
-                              accept=".pdf,.jpg,.jpeg,.png"
-                              className="hidden"
-                              id="gst-upload"
-                            />
-                            <label htmlFor="gst-upload" className="cursor-pointer">
-                              <div className="flex flex-col items-center gap-3">
-                                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                                  <svg
-                                    className="w-8 h-8 text-blue-500"
-                                    fill="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                  </svg>
-                                </div>
-                                {formData.gst_certificate ? (
-                                  <div>
-                                    <p className="text-green-600 font-semibold">
-                                      ✓ {formData.gst_certificate.name}
-                                    </p>
-                                    <p className="text-sm text-gray-500 mt-1">Click to change</p>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <p className="text-gray-800 font-semibold">
-                                      Upload GST Certificate
-                                    </p>
-                                    <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
-                                  </div>
-                                )}
-                              </div>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm font-semibold text-gray-700">
+                              GST Certificate <span className="text-red-500">*</span>
                             </label>
+                            {isLiveRestaurantEdit && previewImages.gst_certificate && (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                                Verified & Locked
+                              </span>
+                            )}
                           </div>
+                          {isLiveRestaurantEdit && previewImages.gst_certificate ? (
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                                  <Shield className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900">GST Certificate Verified</p>
+                                  <p className="text-xs text-gray-500">Document changes are locked for live restaurants</p>
+                                </div>
+                              </div>
+                              <a
+                                href={previewImages.gst_certificate}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 rounded-lg shadow-2xs hover:bg-emerald-50 transition cursor-pointer"
+                              >
+                                View Document
+                              </a>
+                            </div>
+                          ) : (
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
+                              <input
+                                type="file"
+                                onChange={(e) => handleFileUpload("gst_certificate", e)}
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                className="hidden"
+                                id="gst-upload"
+                              />
+                              <label htmlFor="gst-upload" className="cursor-pointer">
+                                <div className="flex flex-col items-center gap-3">
+                                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <svg
+                                      className="w-8 h-8 text-blue-500"
+                                      fill="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                  </div>
+                                  {formData.gst_certificate ? (
+                                    <div>
+                                      <p className="text-green-600 font-semibold">
+                                        ✓ {formData.gst_certificate.name}
+                                      </p>
+                                      <p className="text-sm text-gray-500 mt-1">Click to change</p>
+                                    </div>
+                                  ) : previewImages.gst_certificate ? (
+                                    <div>
+                                      <p className="text-emerald-600 font-semibold">✓ Document Uploaded</p>
+                                      <div className="flex items-center justify-center gap-2 mt-1">
+                                        <a
+                                          href={previewImages.gst_certificate}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-xs text-blue-600 underline"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          View document
+                                        </a>
+                                        <span className="text-xs text-gray-400">•</span>
+                                        <span className="text-xs text-gray-500">Click to replace</span>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <p className="text-gray-800 font-semibold">
+                                        Upload GST Certificate
+                                      </p>
+                                      <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </label>
+                            </div>
+                          )}
                           {errors.gst_certificate && (
                             <p className="text-red-500 text-sm mt-2">{errors.gst_certificate}</p>
                           )}
@@ -2209,21 +3104,27 @@ export default function OnboardingForm() {
                     )}
                   </div>
                   <div className="border-t pt-8">
-                    <div className="bg-green-50 border-l-4 border-green-400 p-5 rounded-lg mb-6">
-                      <h4 className="font-semibold text-gray-900 mb-2">FSSAI License</h4>
+                    <div className={`${isUS ? "bg-blue-50 border-l-4 border-blue-500" : "bg-green-50 border-l-4 border-green-400"} p-5 rounded-lg mb-6`}>
+                      <h4 className="font-semibold text-gray-900 mb-2">
+                        {isUS ? "Food Safety & Health Permit (Optional)" : "FSSAI License"}
+                      </h4>
                       <p className="text-sm text-gray-700 mb-2">
-                        Food license is mandatory for all food businesses
+                        {isUS
+                          ? "FSSAI certification is specific to India. For US restaurants, you may optionally provide your local County Health Department food permit or inspection certificate."
+                          : "Food license is mandatory for all food businesses"}
                       </p>
-                      <ul className="text-xs text-gray-600 space-y-1">
-                        <li>• Name on FSSAI must match restaurant name or PAN name</li>
-                        <li>• Address on FSSAI must match restaurant address</li>
-                      </ul>
+                      {!isUS && (
+                        <ul className="text-xs text-gray-600 space-y-1">
+                          <li>• Name on FSSAI must match restaurant name or PAN name</li>
+                          <li>• Address on FSSAI must match restaurant address</li>
+                        </ul>
+                      )}
                     </div>
                     <div className="space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            FSSAI Number <span className="text-red-500">*</span>
+                            {isUS ? "Food Safety / Health Permit Number" : "FSSAI Number"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
                           <input
                             type="text"
@@ -2232,7 +3133,7 @@ export default function OnboardingForm() {
                             className={`w-full px-4 py-3 border ${
                               errors.fssai_number ? "border-red-500" : "border-gray-300"
                             } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent`}
-                            placeholder="14-digit FSSAI number"
+                            placeholder={isUS ? "Permit number (optional)" : "14-digit FSSAI number"}
                           />
                           {errors.fssai_number && (
                             <p className="text-red-500 text-sm mt-1">{errors.fssai_number}</p>
@@ -2240,7 +3141,7 @@ export default function OnboardingForm() {
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Expiry Date <span className="text-red-500">*</span>
+                            {isUS ? "Permit Expiry Date" : "Expiry Date"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
                           <input
                             aria-label="fssai-expiry"
@@ -2257,44 +3158,91 @@ export default function OnboardingForm() {
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          Upload FSSAI License <span className="text-red-500">*</span>
-                        </label>
-                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                          <input
-                            type="file"
-                            onChange={(e) => handleFileUpload("fssai_license", e)}
-                            accept=".pdf,.jpg,.jpeg,.png"
-                            className="hidden"
-                            id="fssai-upload"
-                          />
-                          <label htmlFor="fssai-upload" className="cursor-pointer">
-                            <div className="flex flex-col items-center gap-3">
-                              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                                <svg
-                                  className="w-8 h-8 text-green-500"
-                                  fill="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                              </div>
-                              {formData.fssai_license ? (
-                                <div>
-                                  <p className="text-green-600 font-semibold">
-                                    ✓ {formData.fssai_license.name}
-                                  </p>
-                                  <p className="text-sm text-gray-500 mt-1">Click to change</p>
-                                </div>
-                              ) : (
-                                <div>
-                                  <p className="text-gray-800 font-semibold">Upload FSSAI License</p>
-                                  <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
-                                </div>
-                              )}
-                            </div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-semibold text-gray-700">
+                            {isUS ? "Health Permit Document" : "FSSAI License Certificate"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
+                          {isLiveRestaurantEdit && previewImages.fssai_license && (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                              <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                              Verified & Locked
+                            </span>
+                          )}
                         </div>
+                        {isLiveRestaurantEdit && previewImages.fssai_license ? (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                                <Shield className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">FSSAI License Verified</p>
+                                <p className="text-xs text-gray-500">Document changes are locked for live restaurants</p>
+                              </div>
+                            </div>
+                            <a
+                              href={previewImages.fssai_license}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 rounded-lg shadow-2xs hover:bg-emerald-50 transition cursor-pointer"
+                            >
+                              View Document
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
+                            <input
+                              type="file"
+                              onChange={(e) => handleFileUpload("fssai_license", e)}
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              className="hidden"
+                              id="fssai-upload"
+                            />
+                            <label htmlFor="fssai-upload" className="cursor-pointer">
+                              <div className="flex flex-col items-center gap-3">
+                                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                                  <svg
+                                    className="w-8 h-8 text-green-500"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                {formData.fssai_license ? (
+                                  <div>
+                                    <p className="text-green-600 font-semibold">
+                                      ✓ {formData.fssai_license.name}
+                                    </p>
+                                    <p className="text-sm text-gray-500 mt-1">Click to change</p>
+                                  </div>
+                                ) : previewImages.fssai_license ? (
+                                  <div>
+                                    <p className="text-emerald-600 font-semibold">✓ Document Uploaded</p>
+                                    <div className="flex items-center justify-center gap-2 mt-1">
+                                      <a
+                                        href={previewImages.fssai_license}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs text-blue-600 underline"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        View document
+                                      </a>
+                                      <span className="text-xs text-gray-400">•</span>
+                                      <span className="text-xs text-gray-500">Click to replace</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <p className="text-gray-800 font-semibold">Upload FSSAI License</p>
+                                    <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        )}
                         {errors.fssai_license && (
                           <p className="text-red-500 text-sm mt-2">{errors.fssai_license}</p>
                         )}
@@ -2305,7 +3253,9 @@ export default function OnboardingForm() {
                     <div className="bg-purple-50 border-l-4 border-purple-400 p-5 rounded-lg mb-6">
                       <h4 className="font-semibold text-gray-900 mb-2">Bank Account Details</h4>
                       <p className="text-sm text-gray-700">
-                        Your earnings will be deposited to this account
+                        {isUS
+                          ? "Your payouts and direct deposits will be processed to this account"
+                          : "Your earnings will be deposited to this account"}
                       </p>
                     </div>
                     <div className="space-y-5">
@@ -2321,7 +3271,7 @@ export default function OnboardingForm() {
                             className={`w-full px-4 py-3 border ${
                               errors.bank_accno ? "border-red-500" : "border-gray-300"
                             } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent`}
-                            placeholder="Account number"
+                            placeholder={isUS ? "Account number (8-17 digits)" : "Account number"}
                           />
                           {errors.bank_accno && (
                             <p className="text-red-500 text-sm mt-1">{errors.bank_accno}</p>
@@ -2348,17 +3298,22 @@ export default function OnboardingForm() {
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            IFSC Code <span className="text-red-500">*</span>
+                            {isUS ? "Routing Number (ABA)" : "IFSC Code"} <span className="text-red-500">*</span>
                           </label>
                           <input
                             type="text"
                             value={formData.ifsc_code}
-                            onChange={(e) => updateField("ifsc_code", e.target.value.toUpperCase())}
+                            onChange={(e) =>
+                              updateField(
+                                "ifsc_code",
+                                isUS ? e.target.value.replace(/\D/g, "").slice(0, 9) : e.target.value.toUpperCase().slice(0, 11)
+                              )
+                            }
                             className={`w-full px-4 py-3 border ${
                               errors.ifsc_code ? "border-red-500" : "border-gray-300"
                             } rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono uppercase`}
-                            placeholder="SBIN0001234"
-                            maxLength={11}
+                            placeholder={isUS ? "9-digit ABA routing number" : "SBIN0001234"}
+                            maxLength={isUS ? 9 : 11}
                           />
                           {errors.ifsc_code && (
                             <p className="text-red-500 text-sm mt-1">{errors.ifsc_code}</p>
@@ -2374,10 +3329,108 @@ export default function OnboardingForm() {
                             onChange={(e) => updateField("account_type", e.target.value as AccountType)}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
                           >
-                            <option value="savings">Savings Account</option>
-                            <option value="current">Current Account</option>
+                            {isUS ? (
+                              <>
+                                <option value="checking">Checking Account</option>
+                                <option value="savings">Savings Account</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="savings">Savings Account</option>
+                                <option value="current">Current Account</option>
+                              </>
+                            )}
                           </select>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 4: Platform & Domains (Staff & Super Admin) */}
+              {currentStep === 4 && isStaffOrAdmin && (
+                <div className="space-y-8 animate-in fade-in duration-150">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider">
+                        Infrastructure & Routing
+                      </span>
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Platform & Domains</h2>
+                    <p className="text-gray-600 mb-6 text-sm">
+                      {userRole === "super_admin"
+                        ? "Configure live POS terminal and Food Ordering App URLs. Custom domain mappings can be managed directly."
+                        : "Review assigned POS terminal and Food Ordering App URLs. Domain routing is platform-managed and read-only for staff accounts."}
+                    </p>
+
+                    <div className="space-y-6 max-w-2xl">
+                      {/* 1. POS Domain (FIRST) */}
+                      <div className="bg-gray-50/70 rounded-xl p-5 border border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-semibold text-gray-800">
+                            POS Terminal Domain <span className="text-red-500">*</span>
+                          </label>
+                          {userRole !== "super_admin" ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-zinc-600 bg-white border border-gray-200 px-2.5 py-0.5 rounded-md font-semibold">
+                              <Lock className="w-3 h-3 text-zinc-400" />
+                              Platform Managed (Read Only)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs text-orange-600 bg-orange-50 border border-orange-200 px-2.5 py-0.5 rounded-md font-semibold">
+                              Configurable Endpoint
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          disabled={userRole !== "super_admin"}
+                          value={posDomain !== "" ? posDomain : defaultPosDomain}
+                          onChange={(e) => setPosDomain(e.target.value)}
+                          placeholder="pos.marinate360.com"
+                          className={`w-full px-4 py-3 border rounded-lg text-sm ${
+                            userRole !== "super_admin"
+                              ? "bg-gray-100 text-gray-600 border-gray-300 cursor-not-allowed font-medium select-none"
+                              : "bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-orange-500 focus:border-transparent font-medium"
+                          }`}
+                        />
+                        <p className="text-xs text-gray-500 mt-1.5">
+                          Operational POS terminal URL for order processing, billing, and kitchen display.
+                        </p>
+                      </div>
+
+                      {/* 2. Food Ordering App URL (SECOND) */}
+                      <div className="bg-gray-50/70 rounded-xl p-5 border border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-semibold text-gray-800">
+                            Food Ordering App URL <span className="text-red-500">*</span>
+                          </label>
+                          {userRole !== "super_admin" ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-zinc-600 bg-white border border-gray-200 px-2.5 py-0.5 rounded-md font-semibold">
+                              <Lock className="w-3 h-3 text-zinc-400" />
+                              Platform Managed (Read Only)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs text-orange-600 bg-orange-50 border border-orange-200 px-2.5 py-0.5 rounded-md font-semibold">
+                              Configurable Endpoint
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          disabled={userRole !== "super_admin"}
+                          value={domainUrl !== "" ? domainUrl : defaultDomainUrl}
+                          onChange={(e) => setDomainUrl(e.target.value)}
+                          placeholder="e.g. restaurant.marinate360.com"
+                          className={`w-full px-4 py-3 border rounded-lg text-sm ${
+                            userRole !== "super_admin"
+                              ? "bg-gray-100 text-gray-600 border-gray-300 cursor-not-allowed font-medium select-none"
+                              : "bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-orange-500 focus:border-transparent font-medium"
+                          }`}
+                        />
+                        <p className="text-xs text-gray-500 mt-1.5">
+                          Public-facing web ordering URL and digital menu for customers.
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -2409,7 +3462,7 @@ export default function OnboardingForm() {
                 ) : (
                   <div></div>
                 )}
-                {currentStep < 3 ? (
+                {currentStep < totalSteps ? (
                   <button
                     type="button"
                     onClick={handleNext}
@@ -2449,7 +3502,13 @@ export default function OnboardingForm() {
                         d="M5 13l4 4L19 7"
                       />
                     </svg>
-                    Submit Registration
+                    {editRestaurantId
+                      ? "Save Restaurant Changes"
+                      : editAppId
+                      ? "Update Application"
+                      : isStaffOrAdmin
+                      ? "Create Restaurant Directly"
+                      : "Submit Registration"}
                   </button>
                 )}
               </div>

@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import {
+  useRouter } from "next/navigation";
 import {
   Building2,
   Store,
@@ -38,6 +39,10 @@ import {
   Sun,
   Moon,
   Sparkles,
+  User,
+  KeyRound,
+  ArrowRight,
+  Pencil
 } from "lucide-react";
 import {
   getMyOnboardingApplications,
@@ -50,6 +55,8 @@ import {
   type RestaurantRecord,
 } from "@/src/app/actions/restaurants";
 import { clearAuthSession } from "@/src/lib/auth-storage";
+import AccountSettingsView from "@/src/components/admin/AccountSettingsView";
+import type { AppProfile } from "@/src/app/actions/profiles";
 
 const PACKAGES = {
   "marinate-menu": {
@@ -160,6 +167,10 @@ export default function CustomerDashboard({
 }) {
   const router = useRouter();
   const [appTheme, setAppTheme] = useState<"light" | "dark">("light");
+  const [customerView, setCustomerView] = useState<"outlets" | "settings">("outlets");
+  const [currentProfile, setCurrentProfile] = useState<AppProfile>(profile);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [outletSearch, setOutletSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [applications, setApplications] = useState<OnboardingApplication[]>([]);
@@ -222,8 +233,24 @@ export default function CustomerDashboard({
       );
       if (matchingApp) matchedAppIds.add(matchingApp.id);
 
-      const rAddress = typeof r.address === "object" && r.address !== null ? r.address : {};
+      let rAddress: any = {};
+      if (typeof r.address === "object" && r.address !== null) {
+        rAddress = r.address;
+      } else if (typeof r.address === "string") {
+        try {
+          rAddress = JSON.parse(r.address);
+        } catch {
+          rAddress = {};
+        }
+      }
       const addrObj = rAddress as Record<string, string>;
+
+      const buildingno = addrObj.address_line_1 || addrObj.buildingno || (typeof r.address === "string" && !r.address.startsWith("{") ? r.address : "");
+      const floor = addrObj.address_line_2 || addrObj.floor || "";
+      const area = addrObj.area || (addrObj.address_line_2 ? addrObj.address_line_2 : "") || buildingno;
+      const city = addrObj.city || (matchingApp?.address as any)?.city || "";
+      const pincode = addrObj.pincode || (matchingApp?.address as any)?.pincode || "";
+      const landmark = addrObj.landmark || (matchingApp?.address as any)?.landmark || "";
 
       list.push({
         id: r.id,
@@ -242,14 +269,14 @@ export default function CustomerDashboard({
         phone: String(r.contact || matchingApp?.phone || ""),
         email: r.email || matchingApp?.email || "",
         address: {
-          buildingno: addrObj.buildingno || "",
-          floor: addrObj.floor || "",
-          area: addrObj.area || "",
-          city: addrObj.city || "",
-          pincode: addrObj.pincode || "",
-          landmark: addrObj.landmark || "",
+          buildingno,
+          floor,
+          area,
+          city,
+          pincode,
+          landmark,
           registered_business_address:
-            addrObj.registered_business_address || (typeof r.address === "string" ? r.address : ""),
+            addrObj.address_line_1 || addrObj.registered_business_address || (typeof r.address === "string" ? r.address : ""),
         },
         legal: {
           pan_number: (matchingApp?.legal?.pan_number as string) || "",
@@ -550,187 +577,416 @@ export default function CustomerDashboard({
             {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500 font-medium hidden md:inline">
-              {profile?.email || initialUser?.email || "Account"}
-            </span>
+          {/* Top-Right Account Menu */}
+          <div className="relative">
             <button
               type="button"
-              onClick={() => setShowLogoutModal(true)}
-              title="Sign Out"
-              className={`p-1.5 rounded-lg border transition ${
+              onClick={() => setProfileDropdownOpen((prev) => !prev)}
+              className={`inline-flex items-center gap-2 rounded-full border py-1 pl-1.5 pr-2.5 text-xs font-semibold shadow-2xs transition ${
                 isDark
-                  ? "border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                  : "border-zinc-200 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900"
+                  ? "border-zinc-800 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                  : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-800"
               }`}
             >
-              <LogOut className="w-3.5 h-3.5" />
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-xs font-bold">
+                {(currentProfile.first_name?.[0] || currentProfile.username?.[0] || currentProfile.email?.[0] || "C").toUpperCase()}
+              </div>
+              <div className="hidden sm:flex flex-col text-left">
+                <span className={`text-xs font-bold leading-tight ${isDark ? "text-zinc-100" : "text-zinc-900"}`}>
+                  {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || currentProfile.email?.split("@")[0] || "Account"}
+                </span>
+                <span className="text-[10px] text-zinc-400 capitalize">{currentProfile.role?.replace("_", " ") || "Owner"}</span>
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${profileDropdownOpen ? "rotate-180" : ""}`} />
             </button>
+
+            {profileDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setProfileDropdownOpen(false)} />
+                <div className={`absolute right-0 top-full mt-2 z-50 w-64 rounded-xl border p-2 shadow-xl animate-in fade-in zoom-in-95 duration-100 ${
+                  isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
+                }`}>
+                  <div className={`px-3 py-2 border-b ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                    <p className="text-xs font-bold">
+                      {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || "Account"}
+                    </p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">{currentProfile.email}</p>
+                    <span className="mt-1.5 inline-block rounded-full bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 text-[10px] font-semibold text-orange-600 capitalize">
+                      {currentProfile.role?.replace("_", " ") || "Restaurant Owner"}
+                    </span>
+                  </div>
+
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setSelectedOutletId(null);
+                        setCustomerView("outlets");
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        customerView === "outlets" && selectedOutletId === null
+                          ? "bg-orange-500/10 text-orange-600 font-bold"
+                          : isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <Store size={14} className="text-zinc-400" />
+                      My Outlets
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setSelectedOutletId(null);
+                        setCustomerView("settings");
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        customerView === "settings"
+                          ? "bg-orange-500/10 text-orange-600 font-bold"
+                          : isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <User size={14} className="text-zinc-400" />
+                      Profile & Settings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setSelectedOutletId(null);
+                        setCustomerView("settings");
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <KeyRound size={14} className="text-zinc-400" />
+                      Change Password
+                    </button>
+                  </div>
+
+                  <div className={`border-t pt-1 ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setShowLogoutModal(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+                    >
+                      <LogOut size={14} className="text-rose-500" />
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
 
       {/* Main Container */}
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        {selectedOutletId === null ? (
-          /* =================================================================== */
-          /* OUTLETS HUB (GRID VIEW) - CLEAN & FOCUSED                          */
-          /* =================================================================== */
+        {customerView === "settings" ? (
           <div className="space-y-6 animate-in fade-in duration-150">
-            {/* Single Clean Page Header with 1 Prominent Button */}
-            <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-6 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+            <div className={`flex items-center justify-between border-b pb-4 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
               <div>
                 <h1 className={`text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
-                  Restaurant Outlets
+                  Account & Profile Settings
                 </h1>
                 <p className="text-xs text-zinc-500 mt-1">
-                  Select an outlet to manage operations, view compliance, or launch the POS terminal.
+                  Manage your personal details and security credentials.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowPackageModal(true)}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold shadow-xs transition"
+                onClick={() => setCustomerView("outlets")}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  isDark
+                    ? "border-zinc-800 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                    : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700"
+                }`}
               >
-                <Plus className="w-4 h-4" />
-                <span>Register New Outlet</span>
+                <ArrowLeft size={14} />
+                Back to Outlets
               </button>
             </div>
 
-            {/* Outlets Grid */}
-            {outlets.length === 0 ? (
-              <div className={`p-12 text-center rounded-2xl border border-dashed ${isDark ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-300 bg-white"}`}>
-                <Store className="w-10 h-10 text-zinc-500 mx-auto" />
-                <h3 className={`mt-3 text-sm font-semibold ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>No outlets registered</h3>
-                <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
-                  Get started by registering your first restaurant branch with digital menu and POS workflows.
+            <AccountSettingsView
+              accessToken={accessToken}
+              profile={currentProfile}
+              onProfileUpdated={(updated) => {
+                setCurrentProfile(updated);
+              }}
+            />
+          </div>
+        ) : selectedOutletId === null ? (
+          /* =================================================================== */
+          /* OUTLETS HUB (GRID VIEW) - ELEVATED PREMIUM DESIGN                   */
+          /* =================================================================== */
+          <div className="space-y-6 animate-in fade-in duration-150">
+            {/* Page Header with Stats & Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h1 className={`text-2xl sm:text-3xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
+                    Restaurant Outlets
+                  </h1>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 text-xs font-semibold text-orange-600">
+                    <Sparkles className="w-3 h-3" />
+                    {outlets.length} {outlets.length === 1 ? "Outlet" : "Outlets"}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-zinc-500 mt-1 max-w-xl">
+                  Select an outlet to manage operations, view compliance, or launch the POS terminal.
                 </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className={`hidden md:flex items-center gap-3 rounded-xl border px-3.5 py-2 text-xs ${
+                  isDark ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-200/80 bg-white"
+                }`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-zinc-500">Active:</span>
+                    <strong className={`font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {outlets.filter((o) => o.status === "active").length}
+                    </strong>
+                  </div>
+                  <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-500">Live POS:</span>
+                    <strong className={`font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {outlets.filter((o) => o.isLive).length}
+                    </strong>
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setShowPackageModal(true)}
-                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white text-xs font-semibold shadow-xs"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold shadow-sm hover:shadow transition-all"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Register First Outlet</span>
+                  <Plus className="w-4 h-4" />
+                  <span>Register New Outlet</span>
                 </button>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {outlets.map((outlet) => (
-                  <div
-                    key={outlet.id}
-                    className={`flex flex-col justify-between rounded-xl border p-5 shadow-xs transition-all group ${
-                      isDark
-                        ? "border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 hover:shadow-lg"
-                        : "border-zinc-200/80 bg-white hover:border-zinc-300 hover:shadow-md"
-                    }`}
+            </div>
+
+            {/* Quick Search when multiple outlets */}
+            {outlets.length > 2 && (
+              <div className="relative max-w-md">
+                <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search outlet by name, city, or branch..."
+                  value={outletSearch}
+                  onChange={(e) => setOutletSearch(e.target.value)}
+                  className={`w-full rounded-xl border pl-10 pr-4 py-2 text-xs font-medium transition focus:outline-hidden focus:ring-2 focus:ring-orange-500 ${
+                    isDark
+                      ? "border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-700"
+                      : "border-zinc-200 bg-white text-zinc-900 placeholder:text-zinc-400 focus:border-orange-500"
+                  }`}
+                />
+                {outletSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setOutletSearch("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-zinc-600"
                   >
-                    <div>
-                      {/* Top status bar */}
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${
-                            outlet.status === "active"
-                              ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                              : outlet.status === "pending"
-                              ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                              : "bg-rose-500/10 text-rose-600 border-rose-500/20"
-                          }`}
-                        >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Outlets Grid */}
+            {(() => {
+              const filteredOutlets = outlets.filter((outlet) => {
+                if (!outletSearch.trim()) return true;
+                const q = outletSearch.toLowerCase();
+                return (
+                  outlet.name.toLowerCase().includes(q) ||
+                  outlet.address?.city?.toLowerCase().includes(q) ||
+                  outlet.package?.toLowerCase().includes(q)
+                );
+              });
+
+              if (filteredOutlets.length === 0) {
+                return (
+                  <div className={`p-12 text-center rounded-2xl border border-dashed ${
+                    isDark ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-300 bg-white"
+                  }`}>
+                    <Store className="w-10 h-10 text-zinc-500 mx-auto" />
+                    <h3 className={`mt-3 text-sm font-semibold ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                      {outletSearch ? "No matching outlets found" : "No outlets registered"}
+                    </h3>
+                    <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
+                      {outletSearch
+                        ? `No branches match "${outletSearch}". Try clearing your search.`
+                        : "Get started by registering your first restaurant branch with digital menu and POS workflows."}
+                    </p>
+                    {outletSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => setOutletSearch("")}
+                        className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border text-xs font-semibold"
+                      >
+                        Clear Search
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowPackageModal(true)}
+                        className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white text-xs font-semibold shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Register First Outlet</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filteredOutlets.map((outlet) => (
+                    <div
+                      key={outlet.id}
+                      className={`group flex flex-col justify-between rounded-2xl border p-5 shadow-xs transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
+                        isDark
+                          ? "border-zinc-800 bg-zinc-900/90 hover:border-zinc-700"
+                          : "border-zinc-200/90 bg-white hover:border-zinc-300 hover:shadow-orange-500/5"
+                      }`}
+                    >
+                      <div>
+                        {/* Top status bar */}
+                        <div className="flex items-center justify-between gap-2">
                           <span
-                            className={`w-1.5 h-1.5 rounded-full ${
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
                               outlet.status === "active"
-                                ? "bg-emerald-500"
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                                 : outlet.status === "pending"
-                                ? "bg-amber-500"
-                                : "bg-rose-500"
-                            }`}
-                          />
-                          <span>{outlet.statusLabel}</span>
-                        </span>
-
-                        <span className="text-[11px] font-mono text-zinc-400 capitalize">
-                          {outlet.package.replace("-", " ")}
-                        </span>
-                      </div>
-
-                      {/* Outlet Info */}
-                      <div className="mt-4 flex items-start gap-3">
-                        <div className={`relative w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-800" : "border-zinc-200 bg-zinc-50"}`}>
-                          {outlet.images?.logo_url?.public_url ? (
-                            <Image
-                              src={outlet.images.logo_url.public_url}
-                              alt={outlet.name}
-                              fill
-                              className="object-cover"
-                            />
-                          ) : (
-                            <Store className="w-5 h-5 text-zinc-400" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className={`text-base font-semibold truncate group-hover:text-orange-500 transition-colors ${isDark ? "text-zinc-100" : "text-zinc-900"}`}>
-                            {outlet.name}
-                          </h3>
-                          <p className="text-xs text-zinc-500 truncate mt-0.5">
-                            {outlet.address.city
-                              ? `${outlet.address.city}, ${outlet.address.pincode || ""}`
-                              : "Address pending"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Services badges */}
-                      <div className="mt-4 flex flex-wrap gap-1.5">
-                        {outlet.services.slice(0, 3).map((s) => (
-                          <span
-                            key={s}
-                            className={`px-2 py-0.5 rounded-md text-[11px] font-medium capitalize ${
-                              isDark ? "bg-zinc-800 text-zinc-400" : "bg-zinc-100 text-zinc-600"
+                                ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                : "bg-rose-500/10 text-rose-600 border-rose-500/20"
                             }`}
                           >
-                            {s.replace("_", " ")}
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                outlet.status === "active"
+                                  ? "bg-emerald-500 animate-pulse"
+                                  : outlet.status === "pending"
+                                  ? "bg-amber-500"
+                                  : "bg-rose-500"
+                              }`}
+                            />
+                            <span>{outlet.statusLabel || (outlet.status === "active" ? "Active Outlet" : outlet.status)}</span>
                           </span>
-                        ))}
-                        {outlet.services.length > 3 && (
-                          <span className={`px-1.5 py-0.5 rounded-md text-[11px] font-medium ${isDark ? "bg-zinc-800 text-zinc-500" : "bg-zinc-100 text-zinc-400"}`}>
-                            +{outlet.services.length - 3}
+
+                          <span className="inline-block text-[10px] font-bold text-orange-600 bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                            {outlet.package?.replace("-", " ") || "Marinate"}
+                          </span>
+                        </div>
+
+                        {/* Outlet Info */}
+                        <div className="mt-4 flex items-start gap-3.5">
+                          <div className={`relative w-13 h-13 rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-2xs group-hover:scale-105 transition-transform ${
+                            isDark ? "border-zinc-800 bg-zinc-800" : "border-zinc-200 bg-zinc-50"
+                          }`}>
+                            {outlet.images?.logo_url?.public_url ? (
+                              <Image
+                                src={outlet.images.logo_url.public_url}
+                                alt={outlet.name}
+                                fill
+                                className="object-cover"
+                              />
+                            ) : (
+                              <Store className="w-6 h-6 text-orange-500" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className={`text-base font-bold truncate group-hover:text-orange-600 transition-colors ${
+                              isDark ? "text-zinc-100" : "text-zinc-900"
+                            }`}>
+                              {outlet.name}
+                            </h3>
+                            <div className="flex items-center gap-1 text-xs text-zinc-500 truncate mt-1">
+                              <MapPin className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+                              <span className="truncate">
+                                {outlet.address?.city
+                                  ? `${outlet.address.city}${outlet.address.pincode ? `, ${outlet.address.pincode}` : ""}`
+                                  : "Address pending"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Services badges */}
+                        <div className="mt-4 flex flex-wrap gap-1.5">
+                          {outlet.services.slice(0, 3).map((s) => (
+                            <span
+                              key={s}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold capitalize border ${
+                                isDark
+                                  ? "bg-zinc-800/80 border-zinc-700/60 text-zinc-300"
+                                  : "bg-zinc-100/80 border-zinc-200/80 text-zinc-700"
+                              }`}
+                            >
+                              {s.replace("_", " ")}
+                            </span>
+                          ))}
+                          {outlet.services.length > 3 && (
+                            <span className={`px-2 py-1 rounded-md text-[11px] font-semibold border ${
+                              isDark
+                                ? "bg-zinc-800/80 border-zinc-700/60 text-zinc-400"
+                                : "bg-zinc-100/80 border-zinc-200/80 text-zinc-500"
+                            }`}>
+                              +{outlet.services.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom Actions */}
+                      <div className={`mt-6 pt-4 border-t flex items-center justify-between gap-2.5 ${
+                        isDark ? "border-zinc-800" : "border-zinc-100"
+                      }`}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOutletId(outlet.id)}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs py-2.5 px-3.5 shadow-xs shadow-orange-600/20 transition-all group/btn"
+                        >
+                          <span>Enter Workspace</span>
+                          <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover/btn:translate-x-0.5" />
+                        </button>
+
+                        {outlet.isLive ? (
+                          <a
+                            href={`https://${outlet.posDomain}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold shadow-2xs transition ${
+                              isDark
+                                ? "border-zinc-700 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 hover:text-white"
+                                : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-800 hover:text-orange-600"
+                            }`}
+                          >
+                            <span>Open POS</span>
+                            <ExternalLink className="w-3 h-3 text-orange-600" />
+                          </a>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-2 rounded-xl ${
+                            isDark ? "bg-zinc-800/60 text-zinc-500" : "bg-zinc-100 text-zinc-400"
+                          }`}>
+                            Under Review
                           </span>
                         )}
                       </div>
                     </div>
-
-                    {/* Bottom Actions */}
-                    <div className={`mt-6 pt-4 border-t flex items-center justify-between gap-2 ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedOutletId(outlet.id)}
-                        className={`text-xs font-medium flex items-center gap-1 transition-colors ${isDark ? "text-zinc-300 hover:text-white" : "text-zinc-700 hover:text-zinc-950"}`}
-                      >
-                        <span>Enter Workspace</span>
-                        <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
-                      </button>
-
-                      {outlet.isLive ? (
-                        <a
-                          href={`https://${outlet.posDomain}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 hover:text-orange-500"
-                        >
-                          <span>Open POS</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      ) : (
-                        <span className="text-[11px] text-zinc-500 font-medium">
-                          Under Review
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         ) : (
           /* =================================================================== */
@@ -804,25 +1060,33 @@ export default function CustomerDashboard({
                     {!currentOutlet.isLive ? (
                       <button
                         type="button"
-                        onClick={() => setIsEditingPending(true)}
-                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium shadow-xs transition ${
+                        onClick={() => {
+                          const appId = currentOutlet.rawApplication?.id || currentOutlet.id;
+                          router.push(`/onboarding?editApplicationId=${encodeURIComponent(appId)}`);
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer ${
                           isDark
                             ? "bg-zinc-100 hover:bg-white text-zinc-900"
                             : "bg-zinc-900 hover:bg-zinc-800 text-white"
                         }`}
                       >
+                        <Pencil size={13} />
                         <span>Edit Application</span>
                       </button>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setIsEditingLive(true)}
-                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border text-xs font-medium shadow-xs transition ${
+                        onClick={() => {
+                          const restId = currentOutlet.rawRestaurant?.id || currentOutlet.id;
+                          router.push(`/onboarding?editRestaurantId=${encodeURIComponent(restId)}`);
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border text-xs font-semibold shadow-xs transition cursor-pointer ${
                           isDark
                             ? "border-zinc-700 hover:bg-zinc-800 text-zinc-200"
                             : "border-zinc-200 hover:bg-zinc-50 text-zinc-800"
                         }`}
                       >
+                        <Pencil size={13} />
                         <span>Edit Branch Info</span>
                       </button>
                     )}
@@ -2128,9 +2392,17 @@ function EditLiveRestaurantModal({
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const addr = (typeof restaurant.address === "object" && restaurant.address !== null
-    ? restaurant.address
-    : {}) as Record<string, string>;
+  let addrObj: any = {};
+  if (typeof restaurant.address === "object" && restaurant.address !== null) {
+    addrObj = restaurant.address;
+  } else if (typeof restaurant.address === "string") {
+    try {
+      addrObj = JSON.parse(restaurant.address);
+    } catch {
+      addrObj = {};
+    }
+  }
+  const addr = addrObj as Record<string, string>;
 
   const [restaurantName, setRestaurantName] = useState(restaurant.restaurant_name || "");
   const [contact, setContact] = useState(String(restaurant.contact || ""));
@@ -2143,7 +2415,7 @@ function EditLiveRestaurantModal({
   const [city, setCity] = useState(addr.city || "");
   const [pincode, setPincode] = useState(addr.pincode || "");
   const [registeredAddress, setRegisteredAddress] = useState(
-    addr.registered_business_address || (typeof restaurant.address === "string" ? restaurant.address : "")
+    addr.address_line_1 || addr.registered_business_address || (typeof restaurant.address === "string" ? restaurant.address : "")
   );
 
   const handleSave = async () => {

@@ -2,6 +2,7 @@
 
 "use client";
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
 import Image from "next/image";
 import {
@@ -10,6 +11,9 @@ import {
   BarChart3,
   Bell,
   CheckCircle2,
+  ChevronDown,
+  KeyRound,
+  Settings as SettingsIcon,
   ChevronRight,
   ClipboardList,
   ExternalLink,
@@ -21,8 +25,11 @@ import {
   Plus,
   Power,
   RefreshCw,
+  Calendar,
   Search,
+  ShieldCheck,
   Store,
+  User,
   Trash2,
   Users,
   X,
@@ -51,11 +58,12 @@ import {
 } from "@/src/app/actions/restaurant-settings";
 import { listAppLogs, purgeOldAppLogs, type AppLogRecord, type LogType } from "@/src/app/actions/app-logs";
 import type { AppProfile } from "@/src/app/actions/profiles";
+import AccountSettingsView from "@/src/components/admin/AccountSettingsView";
 import { supabase } from "@/src/lib/supabase/client";
 import { RESTAURANT_SETTING_DEFINITIONS, type RestaurantSettingDefinition } from "@/src/lib/constants/restaurant-settings";
 import { formatAddress } from "@/src/lib/utils/address";
 import UsersManagementView from "./admin/UsersManagementView";
-import CreateRestaurantModal from "@/src/components/modals/CreateRestaurantModal";
+import SelectPackageModal from "@/src/components/modals/SelectPackageModal";
 import EditRestaurantModal from "@/src/components/modals/EditRestaurantModal";
 
 type Props = {
@@ -64,13 +72,17 @@ type Props = {
   onLogout: () => void;
 };
 
-type AdminView = "overview" | "applications" | "restaurants" | "users" | "logs";
+type AdminView = "overview" | "applications" | "restaurants" | "users" | "logs" | "settings";
 type RestaurantPanelTab = "overview" | "settings";
 
 const STATUS_TABS: Array<ApplicationStatus | "all"> = ["all", "pending", "accepted", "rejected"];
 const PACKAGES = ["marinate-menu", "marinate-dinein", "marinate360", "marinate-foodtruck"];
 
-export default function AdminDashboard({ accessToken, profile, onLogout }: Props) {
+export default function AdminDashboard({
+  // router initialized
+ accessToken, profile, onLogout }: Props) {
+  const [currentProfile, setCurrentProfile] = useState<AppProfile>(profile);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState<AdminView>("overview");
   const [records, setRecords] = useState<OnboardingApplication[]>([]);
   const [restaurants, setRestaurants] = useState<RestaurantRecord[]>([]);
@@ -86,6 +98,9 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
   const [logPage, setLogPage] = useState(1);
   const [logType, setLogType] = useState<LogType | "all">("all");
   const [status, setStatus] = useState<ApplicationStatus | "all">("pending");
+  const router = useRouter();
+  const [creatorFilter, setCreatorFilter] = useState<"all" | "staff" | "super_admin">("all");
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "this_week" | "this_month">("all");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [restaurantSearch, setRestaurantSearch] = useState("");
@@ -94,6 +109,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
   const [logTimeRange, setLogTimeRange] = useState<"1h" | "24h" | "7d" | "all">("24h");
   const [logStatusCategory, setLogStatusCategory] = useState<"all" | "2xx" | "4xx" | "5xx">("all");
   const [page, setPage] = useState(1);
+  const [appPageSize, setAppPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState("");
@@ -108,7 +124,15 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
   const refreshDashboard = useCallback(async () => {
     setLoading(true);
     const [applicationsResult, restaurantsResult] = await Promise.all([
-      listOnboardingApplications({ accessToken, page, pageSize: 10, status, query: debouncedSearch }),
+      listOnboardingApplications({
+        accessToken,
+        page,
+        pageSize: appPageSize,
+        status,
+        query: debouncedSearch,
+        creatorRole: creatorFilter,
+        timeRange: dateFilter,
+      }),
       listRestaurants(accessToken),
     ]);
 
@@ -126,7 +150,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     }
 
     setLoading(false);
-  }, [accessToken, debouncedSearch, page, status]);
+  }, [accessToken, debouncedSearch, page, appPageSize, status, creatorFilter, dateFilter]);
 
   const loadRestaurantSettings = useCallback(
     async (restaurantId: string) => {
@@ -233,11 +257,15 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
     const pending = records.filter((record) => record.status === "pending").length;
     const accepted = records.filter((record) => record.status === "accepted").length;
     const rejected = records.filter((record) => record.status === "rejected").length;
+    const createdByStaff = restaurants.filter((r) => r.creator_role === "staff").length;
+    const createdByAdmin = restaurants.filter((r) => r.creator_role === "super_admin").length;
     return {
       pending,
       accepted,
       rejected,
       restaurants: restaurants.length,
+      createdByStaff,
+      createdByAdmin,
       total: pending + accepted + rejected,
     };
   }, [records, restaurants]);
@@ -390,38 +418,31 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
       <div className="flex min-h-screen">
         <aside className="hidden w-72 shrink-0 border-r border-zinc-200 bg-white lg:block">
           <div className="sticky top-0 flex h-screen flex-col">
-            <div className="border-b border-zinc-100 px-5 py-5">
-              <div className="flex items-center gap-2.5">
-                <Image
-                  src="/logo/m360logo.png"
-                  alt="Marinate360"
-                  width={28}
-                  height={28}
-                  className="h-7 w-auto object-contain"
-                />
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Marinate360</p>
+            <div className="flex flex-col">
+              <div className="border-b border-zinc-100 px-5 py-5">
+                <div className="flex items-center gap-2.5">
+                  <Image
+                    src="/logo/m360logo.png"
+                    alt="Marinate360"
+                    width={28}
+                    height={28}
+                    className="h-7 w-auto object-contain"
+                  />
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Marinate360</p>
+                </div>
+                <h1 className="mt-2 text-xl font-semibold tracking-tight">Super Admin</h1>
               </div>
-              <h1 className="mt-2 text-xl font-semibold tracking-tight">Super Admin</h1>
-              <p className="mt-1 text-sm text-zinc-500">{profile.email}</p>
+              <nav className="space-y-1 px-3 py-4">
+                <SidebarButton icon={<LayoutDashboard size={18} />} label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
+                <SidebarButton icon={<ClipboardList size={18} />} label="Applications" active={activeView === "applications"} onClick={() => setActiveView("applications")} badge={stats.pending} />
+                <SidebarButton icon={<Store size={18} />} label="Restaurants" active={activeView === "restaurants"} onClick={() => setActiveView("restaurants")} />
+                <SidebarButton icon={<Users size={18} />} label="Manage users" active={activeView === "users"} onClick={() => setActiveView("users")} />
+                <SidebarButton icon={<FileClock size={18} />} label="Logs" active={activeView === "logs"} onClick={() => setActiveView("logs")} />
+                <SidebarButton icon={<SettingsIcon size={18} />} label="Settings" active={activeView === "settings"} onClick={() => setActiveView("settings")} />
+              </nav>
             </div>
-            <nav className="flex-1 space-y-1 px-3 py-4">
-              <SidebarButton icon={<LayoutDashboard size={18} />} label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
-              <SidebarButton icon={<ClipboardList size={18} />} label="Applications" active={activeView === "applications"} onClick={() => setActiveView("applications")} badge={stats.pending} />
-              <SidebarButton icon={<Store size={18} />} label="Restaurants" active={activeView === "restaurants"} onClick={() => setActiveView("restaurants")} />
-              <SidebarButton icon={<Users size={18} />} label="Manage users" active={activeView === "users"} onClick={() => setActiveView("users")} />
-              <SidebarButton icon={<FileClock size={18} />} label="Logs" active={activeView === "logs"} onClick={() => setActiveView("logs")} />
-            </nav>
-            <div className="border-t border-zinc-100 p-4">
-              {/* <button onClick={() => void refreshDashboard()} className="mb-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100">
-                <RefreshCw size={16} />
-                Refresh
-              </button> */}
-              <button onClick={handleLogoutRequest} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100">
-                <LogOut size={16} />
-                Logout
-              </button>
+
             </div>
-          </div>
         </aside>
 
         <section className="min-w-0 flex-1">
@@ -444,6 +465,73 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                     <Plus size={16} />
                     New restaurant
                   </button>
+
+                  {/* Top-Right Account Menu */}
+                  <div className="relative ml-1">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsMenuOpen((prev) => !prev)}
+                      className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white py-1 pl-1.5 pr-2.5 text-xs font-semibold shadow-2xs hover:bg-zinc-50 transition"
+                    >
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-xs font-bold">
+                        {(currentProfile.first_name?.[0] || currentProfile.username?.[0] || currentProfile.email?.[0] || "A").toUpperCase()}
+                      </div>
+                      <div className="hidden sm:flex flex-col text-left">
+                        <span className="text-xs font-bold text-zinc-900 leading-tight">
+                          {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || "Super Admin"}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 capitalize">{currentProfile.role.replace("_", " ")}</span>
+                      </div>
+                      <ChevronDown size={14} className={`text-zinc-400 transition-transform ${settingsMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {settingsMenuOpen && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setSettingsMenuOpen(false)} />
+                        <div className="absolute right-0 top-full mt-2 z-40 w-60 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                          <div className="px-3 py-2 border-b border-zinc-100">
+                            <p className="text-xs font-bold text-zinc-900">
+                              {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || "Super Admin"}
+                            </p>
+                            <p className="text-xs text-zinc-500 truncate mt-0.5">{currentProfile.email}</p>
+                            
+                          </div>
+
+                          <div className="py-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettingsMenuOpen(false);
+                                setActiveView("settings");
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                activeView === "settings"
+                                  ? "bg-orange-50 text-orange-700"
+                                  : "text-zinc-700 hover:bg-zinc-100"
+                              }`}
+                            >
+                              <User size={14} className="text-zinc-500" />
+                              Profile & Password
+                            </button>
+                          </div>
+
+                          <div className="border-t border-zinc-100 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettingsMenuOpen(false);
+                                handleLogoutRequest();
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+                            >
+                              <LogOut size={14} className="text-rose-500" />
+                              Sign out
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex gap-2 overflow-x-auto lg:hidden">
@@ -459,11 +547,13 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
           <div className="px-4 py-6 sm:px-6 xl:px-8">
             {activeView === "overview" && (
               <div className="space-y-6">
-                <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                   <StatCard label="Pending review" value={stats.pending} sub="Awaiting decision" icon={<Bell size={18} />} tone="orange" />
                   <StatCard label="Accepted" value={stats.accepted} sub="Created restaurants" icon={<CheckCircle2 size={18} />} tone="green" />
                   <StatCard label="Rejected" value={stats.rejected} sub="Need follow-up" icon={<XCircle size={18} />} tone="red" />
                   <StatCard label="Restaurants" value={stats.restaurants} sub="In production data" icon={<Store size={18} />} tone="zinc" />
+                  <StatCard label="Created by Staff" value={stats.createdByStaff} sub="Staff creations" icon={<Users size={18} />} tone="indigo" />
+                  <StatCard label="Created by Admin" value={stats.createdByAdmin} sub="Owner creations" icon={<ShieldCheck size={18} />} tone="purple" />
                 </section>
 
                 <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
@@ -486,8 +576,14 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                   setSearch={setSearch}
                   status={status}
                   setStatus={setStatus}
+                  creatorFilter={creatorFilter}
+                  setCreatorFilter={setCreatorFilter}
+                  dateFilter={dateFilter}
+                  setDateFilter={setDateFilter}
                   page={page}
                   setPage={setPage}
+                  pageSize={appPageSize}
+                  setPageSize={setAppPageSize}
                   totalPages={totalPages}
                 />
               </div>
@@ -504,8 +600,14 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                 setSearch={setSearch}
                 status={status}
                 setStatus={setStatus}
+                creatorFilter={creatorFilter}
+                setCreatorFilter={setCreatorFilter}
+                dateFilter={dateFilter}
+                setDateFilter={setDateFilter}
                 page={page}
                 setPage={setPage}
+                pageSize={appPageSize}
+                setPageSize={setAppPageSize}
                 totalPages={totalPages}
               />
             )}
@@ -519,7 +621,7 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                   activeTab={restaurantPanelTab}
                   onTabChange={setRestaurantPanelTab}
                   onBack={() => setSelectedRestaurantId("")}
-                  onEdit={() => setEditingRestaurant(selectedRestaurant)}
+                  onEdit={() => router.push(`/onboarding?editRestaurantId=${encodeURIComponent(selectedRestaurant.id)}`)}
                   onToggleState={handleToggleRestaurantState}
                   onDelete={handleDeleteRestaurant}
                   onAddSetting={handleAddSetting}
@@ -539,8 +641,21 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
                     setSelectedRestaurantId(id);
                     setRestaurantPanelTab("overview");
                   }}
+                  onEdit={(id) => {
+                    router.push(`/onboarding?editRestaurantId=${encodeURIComponent(id)}`);
+                  }}
                 />
               )
+            )}
+
+            {activeView === "settings" && (
+              <AccountSettingsView
+                accessToken={accessToken}
+                profile={currentProfile}
+                onProfileUpdated={(updated) => {
+                  setCurrentProfile(updated);
+                }}
+              />
             )}
 
             {activeView === "users" && (
@@ -598,14 +713,11 @@ export default function AdminDashboard({ accessToken, profile, onLogout }: Props
       )}
 
       {showCreate && (
-        <CreateRestaurantModal
-          accessToken={accessToken}
+        <SelectPackageModal
           onClose={() => setShowCreate(false)}
-          onCreated={async (newId) => {
+          onSelect={(pkgKey, services) => {
             setShowCreate(false);
-            await refreshDashboard();
-            setSelectedRestaurantId(newId);
-            setActiveView("restaurants");
+            router.push(`/onboarding?package=${encodeURIComponent(pkgKey)}&services=${encodeURIComponent(services.join(","))}`);
           }}
         />
       )}
@@ -829,6 +941,7 @@ function viewTitle(view: AdminView) {
     restaurants: "Restaurant workspace",
     users: "User management",
     logs: "Restaurant logs",
+    settings: "Account & Profile Settings",
   }[view];
 }
 
@@ -881,12 +994,14 @@ function MobileTab({ label, active, onClick }: { label: string; active: boolean;
   );
 }
 
-function StatCard({ label, value, sub, icon, tone }: { label: string; value: number; sub: string; icon: React.ReactNode; tone: "orange" | "green" | "red" | "zinc" }) {
+function StatCard({ label, value, sub, icon, tone }: { label: string; value: number; sub: string; icon: React.ReactNode; tone: "orange" | "green" | "red" | "zinc" | "indigo" | "purple" }) {
   const toneStyles = {
     orange: "bg-orange-100 text-orange-700",
     green: "bg-emerald-100 text-emerald-700",
     red: "bg-rose-100 text-rose-700",
     zinc: "bg-zinc-100 text-zinc-700",
+    indigo: "bg-indigo-100 text-indigo-700",
+    purple: "bg-purple-100 text-purple-700",
   };
 
   return (
@@ -982,8 +1097,14 @@ function ApplicationsTable({
   setSearch,
   status,
   setStatus,
+  creatorFilter,
+  setCreatorFilter,
+  dateFilter,
+  setDateFilter,
   page,
   setPage,
+  pageSize = 10,
+  setPageSize,
   totalPages,
   compact = false,
 }: {
@@ -996,8 +1117,14 @@ function ApplicationsTable({
   setSearch: (value: string) => void;
   status: ApplicationStatus | "all";
   setStatus: (value: ApplicationStatus | "all") => void;
+  creatorFilter: "all" | "staff" | "super_admin";
+  setCreatorFilter: (value: "all" | "staff" | "super_admin") => void;
+  dateFilter: "all" | "today" | "this_week" | "this_month";
+  setDateFilter: (value: "all" | "today" | "this_week" | "this_month") => void;
   page: number;
   setPage: (value: number | ((current: number) => number)) => void;
+  pageSize?: number;
+  setPageSize?: (value: number) => void;
   totalPages: number;
   compact?: boolean;
 }) {
@@ -1009,6 +1136,18 @@ function ApplicationsTable({
     });
     return map;
   }, [restaurants]);
+
+  const displayedRecords = useMemo(() => {
+    if (creatorFilter === "all") return records;
+    return records.filter((record) => {
+      const linkedRest = record.restaurant_id
+        ? restaurantMap.get(record.restaurant_id)
+        : restaurantMap.get(record.domain_name.toLowerCase());
+      const cRole = linkedRest?.creator_role 
+        ?? (record.submitted_by_role === "staff" ? "staff" : record.submitted_by_role === "super_admin" ? "super_admin" : null);
+      return cRole === creatorFilter;
+    });
+  }, [records, creatorFilter, restaurantMap]);
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -1031,21 +1170,60 @@ function ApplicationsTable({
             />
           </div>
         </div>
-        <div className="mt-4 flex gap-2 overflow-x-auto">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => {
-                setStatus(tab);
-                setPage(1);
-              }}
-              className={`rounded-md px-3 py-2 text-sm font-semibold capitalize ${
-                status === tab ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-2 overflow-x-auto">
+            {STATUS_TABS.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => {
+                  setStatus(tab);
+                  setPage(1);
+                }}
+                className={`rounded-md px-3 py-2 text-sm font-semibold capitalize ${
+                  status === tab ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Creator Filter */}
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500 font-medium">
+              <span>Creator:</span>
+              <select
+                value={creatorFilter}
+                onChange={(e) => {
+                  setCreatorFilter(e.target.value as any);
+                  setPage(1);
+                }}
+                className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
+              >
+                <option value="all">All Creators</option>
+                <option value="staff">Staff Only</option>
+                <option value="super_admin">Super Admin Only</option>
+              </select>
+            </div>
+
+            {/* Date Filter */}
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500 font-medium">
+              <span>Date:</span>
+              <select
+                value={dateFilter}
+                onChange={(e) => {
+                  setDateFilter(e.target.value as any);
+                  setPage(1);
+                }}
+                className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
+              >
+                <option value="all">All Time</option>
+                <option value="today">Created Today</option>
+                <option value="this_week">This Week (Last 7d)</option>
+                <option value="this_month">This Month (Last 30d)</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1055,6 +1233,7 @@ function ApplicationsTable({
             <tr>
               <th className="px-4 py-3">Restaurant</th>
               <th className="px-4 py-3">Owner</th>
+              <th className="px-4 py-3">Created By</th>
               <th className="px-4 py-3">Package</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Date</th>
@@ -1064,21 +1243,32 @@ function ApplicationsTable({
           <tbody className="divide-y divide-zinc-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-zinc-500">
+                <td colSpan={7} className="px-4 py-10 text-center text-zinc-500">
                   Loading applications...
                 </td>
               </tr>
-            ) : records.length === 0 ? (
+            ) : displayedRecords.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-zinc-500">
+                <td colSpan={7} className="px-4 py-10 text-center text-zinc-500">
                   No applications found.
                 </td>
               </tr>
             ) : (
-              records.map((record) => {
+              displayedRecords.map((record) => {
                 const linkedRest = record.restaurant_id
                   ? restaurantMap.get(record.restaurant_id)
                   : restaurantMap.get(record.domain_name.toLowerCase());
+
+                // Prioritize the actual restaurant creator (from restaurants.created_by)
+                // Fallback to applicant/submitter if created directly or by staff
+                const creatorRole = linkedRest?.creator_role 
+                  ?? (record.submitted_by_role === "staff" ? "staff" : record.submitted_by_role === "super_admin" ? "super_admin" : null);
+
+                const creatorName = linkedRest?.creator_name 
+                  || (creatorRole ? record.submitted_by_name : null);
+
+                const creatorEmail = linkedRest?.creator_email 
+                  || (creatorRole ? record.submitted_by_email : null);
 
                 return (
                   <tr key={record.id} className="hover:bg-orange-50/40">
@@ -1089,6 +1279,31 @@ function ApplicationsTable({
                     <td className="px-4 py-3">
                       <div className="font-medium text-zinc-800">{record.owner_name}</div>
                       <div className="text-xs text-zinc-500">{record.email}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {creatorRole ? (
+                        <div>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                              creatorRole === "staff"
+                                ? "bg-indigo-50 border border-indigo-200 text-indigo-700"
+                                : "bg-purple-50 border border-purple-200 text-purple-700"
+                            }`}
+                          >
+                            <User size={11} />
+                            {creatorRole === "staff" ? "Staff" : "Super Admin"}
+                          </span>
+                          {(creatorName || creatorEmail) && (
+                            <div className="text-[11px] text-zinc-500 mt-0.5 truncate max-w-[130px]" title={creatorEmail || creatorName || ""}>
+                              {creatorName || creatorEmail}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                          Customer / Direct
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">
@@ -1161,16 +1376,52 @@ function ApplicationsTable({
       </div>
 
       {!compact && (
-        <div className="flex items-center justify-between border-t border-zinc-100 px-4 py-3 text-sm">
-          <button disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-md border border-zinc-200 px-3 py-2 font-semibold disabled:opacity-40">
-            Previous
-          </button>
-          <span className="text-zinc-500">
-            Page {page} of {totalPages}
-          </span>
-          <button disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="rounded-md border border-zinc-200 px-3 py-2 font-semibold disabled:opacity-40">
-            Next
-          </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-zinc-100 px-4 py-3 text-sm text-zinc-700">
+          {/* Left: Rows per page */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-zinc-500">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                if (setPageSize) setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={15}>15</option>
+              <option value={20}>20</option>
+            </select>
+          </div>
+
+          {/* Center: Showing count */}
+          <div className="text-center text-xs font-medium text-zinc-500">
+            Showing {records.length === 0 ? 0 : (page - 1) * pageSize + 1}–{(page - 1) * pageSize + records.length} applications
+          </div>
+
+          {/* End: Prev / Page / Next */}
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 transition"
+            >
+              Previous
+            </button>
+            <span className="px-1 text-xs font-medium text-zinc-600">
+              Page <strong className="text-zinc-900">{page}</strong> of <strong className="text-zinc-900">{totalPages}</strong>
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 transition"
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
     </section>
@@ -1186,6 +1437,7 @@ function RestaurantsGrid({
   emptyTitle,
   emptyBody,
   onSelect,
+  onEdit,
 }: {
   restaurants: RestaurantRecord[];
   search: string;
@@ -1195,7 +1447,45 @@ function RestaurantsGrid({
   emptyTitle: string;
   emptyBody: string;
   onSelect: (value: string) => void;
+  onEdit?: (value: string) => void;
 }) {
+  const [creatorFilter, setCreatorFilter] = useState<"all" | "staff" | "super_admin">("all");
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "this_week" | "this_month">("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, creatorFilter, dateFilter]);
+
+  const filteredRestaurants = useMemo(() => {
+    return restaurants.filter((r) => {
+      if (creatorFilter !== "all" && r.creator_role !== creatorFilter) {
+        return false;
+      }
+      if (dateFilter !== "all") {
+        const createdTime = new Date(r.created_at).getTime();
+        const now = Date.now();
+        if (dateFilter === "today") {
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+          if (createdTime < startOfToday.getTime()) return false;
+        } else if (dateFilter === "this_week") {
+          if (now - createdTime > 7 * 24 * 60 * 60 * 1000) return false;
+        } else if (dateFilter === "this_month") {
+          if (now - createdTime > 30 * 24 * 60 * 60 * 1000) return false;
+        }
+      }
+      return true;
+    });
+  }, [restaurants, creatorFilter, dateFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRestaurants.length / pageSize));
+  const paginatedRestaurants = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredRestaurants.slice(start, start + pageSize);
+  }, [filteredRestaurants, page, pageSize]);
+
   return (
     <section className="space-y-5">
       <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -1207,44 +1497,148 @@ function RestaurantsGrid({
             </h3>
             <p className="mt-1 text-sm text-zinc-500">{description}</p>
           </div>
-          <label className="relative block w-full max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-            <input
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Search restaurant or domain"
-              className="w-full rounded-md border border-zinc-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-orange-500"
-            />
-          </label>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <select
+              value={creatorFilter}
+              onChange={(e) => setCreatorFilter(e.target.value as any)}
+              className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500"
+            >
+              <option value="all">All Creators</option>
+              <option value="staff">Staff Created</option>
+              <option value="super_admin">Super Admin Created</option>
+            </select>
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as any)}
+              className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500"
+            >
+              <option value="all">All Time</option>
+              <option value="today">Created Today</option>
+              <option value="this_week">This Week</option>
+              <option value="this_month">This Month</option>
+            </select>
+            <label className="relative block w-full sm:w-64">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                value={search}
+                onChange={(event) => onSearchChange(event.target.value)}
+                placeholder="Search restaurant or domain"
+                className="w-full rounded-md border border-zinc-200 bg-white py-1.5 pl-9 pr-3 text-sm outline-none focus:border-orange-500"
+              />
+            </label>
+          </div>
         </div>
       </div>
 
-      {restaurants.length === 0 ? (
+      {filteredRestaurants.length === 0 ? (
         <EmptyWorkspace title={emptyTitle} body={emptyBody} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {restaurants.map((restaurant) => (
-            <button
+          {paginatedRestaurants.map((restaurant) => (
+            <div
               key={restaurant.id}
               onClick={() => onSelect(restaurant.id)}
-              className="group rounded-lg border border-zinc-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-md"
+              className="group rounded-lg border border-zinc-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-md cursor-pointer"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-xl font-semibold tracking-tight">{restaurant.restaurant_name}</div>
                   <div className="mt-1 truncate text-sm text-zinc-500">{restaurant.domain_name}</div>
                 </div>
-                <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${restaurant.is_active ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
-                  {restaurant.is_active ? "Active" : "Inactive"}
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${restaurant.is_active ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
+                    {restaurant.is_active ? "Active" : "Inactive"}
+                  </span>
+                  {restaurant.creator_role ? (
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      restaurant.creator_role === "staff"
+                        ? "bg-indigo-50 border border-indigo-200 text-indigo-700"
+                        : "bg-purple-50 border border-purple-200 text-purple-700"
+                    }`}>
+                      <User size={10} />
+                      {restaurant.creator_role === "staff" ? "Staff" : "Super Admin"}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-between border-t border-zinc-100 pt-2 text-[11px] text-zinc-500">
+                <span className="truncate max-w-[140px]" title={restaurant.creator_email || ""}>
+                  {restaurant.creator_name || restaurant.creator_email || "System"}
                 </span>
+                <span>{formatDateTime(restaurant.created_at)}</span>
               </div>
 
-              <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-orange-600">
-                Open workspace
-                <ChevronRight size={16} className="transition group-hover:translate-x-0.5" />
+              <div className="mt-6 flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 text-sm font-semibold text-orange-600">
+                  Open workspace
+                  <ChevronRight size={16} className="transition group-hover:translate-x-0.5" />
+                </span>
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(restaurant.id);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-orange-50 hover:border-orange-300 hover:text-orange-700 transition shadow-2xs"
+                  >
+                    <Pencil size={13} />
+                    Edit
+                  </button>
+                )}
               </div>
-            </button>
+            </div>
           ))}
+        </div>
+      )}
+
+      {filteredRestaurants.length > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700 shadow-xs">
+          {/* Left: Rows per page */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-zinc-500">Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 outline-none focus:border-orange-500"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={15}>15</option>
+              <option value={20}>20</option>
+            </select>
+          </div>
+
+          {/* Center: Showing count */}
+          <div className="text-center text-xs font-medium text-zinc-500">
+            Showing {Math.min((page - 1) * pageSize + 1, filteredRestaurants.length)}–{Math.min(page * pageSize, filteredRestaurants.length)} of {filteredRestaurants.length} restaurants
+          </div>
+
+          {/* End: Prev / Page / Next */}
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 transition"
+            >
+              Previous
+            </button>
+            <span className="px-1 text-xs font-medium text-zinc-600">
+              Page <strong className="text-zinc-900">{page}</strong> of <strong className="text-zinc-900">{totalPages}</strong>
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 transition"
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
     </section>
@@ -2283,22 +2677,25 @@ function LogPagination({
   setPage: (value: number | ((current: number) => number)) => void;
 }) {
   return (
-    <div className="flex items-center justify-between border-t border-zinc-100 px-4 py-3 text-sm">
-      <span className="text-zinc-500">
-        {totalRecords} log{totalRecords !== 1 ? "s" : ""} · Page {page} of {totalPages}
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-zinc-100 px-4 py-3 text-sm">
+      <span className="text-xs font-medium text-zinc-500">
+        {totalRecords} total log{totalRecords !== 1 ? "s" : ""}
       </span>
-      <div className="flex items-center gap-2">
+      <span className="text-center text-xs font-medium text-zinc-600">
+        Page <strong className="text-zinc-900">{page}</strong> of <strong className="text-zinc-900">{totalPages}</strong>
+      </span>
+      <div className="flex items-center justify-end gap-1.5">
         <button
           disabled={page <= 1}
           onClick={() => setPage((current) => Math.max(1, current - 1))}
-          className="rounded-md border border-zinc-200 px-3 py-1.5 font-semibold disabled:opacity-40 hover:bg-zinc-50"
+          className="inline-flex items-center rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 transition"
         >
           Previous
         </button>
         <button
           disabled={page >= totalPages}
           onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-          className="rounded-md border border-zinc-200 px-3 py-1.5 font-semibold disabled:opacity-40 hover:bg-zinc-50"
+          className="inline-flex items-center rounded-lg border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 transition"
         >
           Next
         </button>

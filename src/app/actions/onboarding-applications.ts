@@ -1,5 +1,6 @@
 ﻿"use server";
 
+import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { revalidatePath } from "next/cache";
 import { uploadRestaurantAsset, type StoredAsset } from "./restaurant-images";
 import {
@@ -41,14 +42,19 @@ export type OnboardingApplication = {
   reviewed_at?: string | null;
   created_at: string;
   updated_at: string;
+  submitted_by_role?: "staff" | "super_admin" | "admin" | string | null;
+  submitted_by_email?: string | null;
+  submitted_by_name?: string | null;
 };
 
-type ListOptions = {
+export type ListOptions = {
   accessToken: string;
   page?: number;
   pageSize?: number;
   status?: ApplicationStatus | "all";
   query?: string;
+  creatorRole?: "all" | "staff" | "super_admin";
+  timeRange?: "all" | "today" | "this_week" | "this_month";
 };
 
 type OnboardingPayload = {
@@ -273,14 +279,11 @@ export async function listOnboardingApplications(options: ListOptions): Promise<
       const admin = getSupabaseAdmin();
       const page = Math.max(options.page ?? 1, 1);
       const pageSize = Math.min(Math.max(options.pageSize ?? 10, 5), 50);
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
 
       let query = admin
         .from("onboarding_applications")
         .select("*", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .range(from, to);
+        .order("created_at", { ascending: false });
 
       if (options.status && options.status !== "all") {
         query = query.eq("status", options.status);
@@ -291,13 +294,96 @@ export async function listOnboardingApplications(options: ListOptions): Promise<
         query = query.or(`restaurant_name.ilike.${search},email.ilike.${search},domain_name.ilike.${search}`);
       }
 
-      const { data, error, count } = await query;
+      if (options.timeRange && options.timeRange !== "all") {
+        const now = new Date();
+        let cutoff: Date;
+        if (options.timeRange === "today") {
+          cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        } else if (options.timeRange === "this_week") {
+          cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        } else if (options.timeRange === "this_month") {
+          cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        } else {
+          cutoff = new Date(0);
+        }
+        query = query.gte("created_at", cutoff.toISOString());
+      }
+
+      if (options.creatorRole && options.creatorRole !== "all") {
+        const { data: matchedProfiles } = await admin
+          .from("profiles")
+          .select("id")
+          .eq("role", options.creatorRole);
+        const profileIds = (matchedProfiles ?? []).map((p) => p.id);
+
+        // Also check if any restaurant was created by these users
+        const { data: matchedRestaurants } = profileIds.length > 0
+          ? await admin.from("restaurants").select("id").in("created_by", profileIds)
+          : { data: [] };
+        const restIds = (matchedRestaurants ?? []).map((r) => r.id);
+
+        const orFilters: string[] = [];
+        if (profileIds.length > 0) {
+          orFilters.push(`submitted_by.in.(${profileIds.join(",")})`);
+        }
+        if (restIds.length > 0) {
+          orFilters.push(`restaurant_id.in.(${restIds.join(",")})`);
+        }
+
+        if (orFilters.length === 0) {
+          return {
+            ok: true,
+            data: { records: [], totalCount: 0, totalPages: 1 },
+          };
+        }
+        query = query.or(orFilters.join(","));
+      }
+
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error, count } = await query.range(from, to);
       if (error) throw new Error(error.message);
+
+      const rawRecords = (data ?? []) as OnboardingApplication[];
+
+      // Resolve submitter profile details
+      const submitterIds = Array.from(
+        new Set(rawRecords.map((r) => r.submitted_by).filter((id): id is string => Boolean(id)))
+      );
+
+      const profileMap = new Map<string, { role: string; email?: string | null; full_name?: string | null }>();
+      if (submitterIds.length > 0) {
+        const profiles = await fetchAllPaginatedRows<any>((pFrom, pTo) =>
+          admin
+            .from("profiles")
+            .select("id, role, email, first_name, last_name")
+            .in("id", submitterIds)
+            .range(pFrom, pTo)
+        );
+        for (const p of profiles) {
+          const name = [p.first_name, p.last_name].filter(Boolean).join(" ") || null;
+          profileMap.set(p.id, {
+            role: p.role,
+            email: p.email,
+            full_name: name,
+          });
+        }
+      }
+
+      const records: OnboardingApplication[] = rawRecords.map((r) => {
+        const prof = r.submitted_by ? profileMap.get(r.submitted_by) : undefined;
+        return {
+          ...r,
+          submitted_by_role: prof?.role ?? null,
+          submitted_by_email: prof?.email ?? null,
+          submitted_by_name: prof?.full_name ?? null,
+        };
+      });
 
       return {
         ok: true,
         data: {
-          records: (data ?? []) as OnboardingApplication[],
+          records,
           totalCount: count ?? 0,
           totalPages: Math.max(Math.ceil((count ?? 0) / pageSize), 1),
         },
@@ -455,13 +541,15 @@ export async function getMyOnboardingApplications(accessToken: string): Promise<
       ctx.actorId = user.id;
 
       const admin = getSupabaseAdmin();
-      const { data, error } = await admin
-        .from("onboarding_applications")
-        .select("*")
-        .or(`submitted_by.eq.${user.id},email.eq.${user.email}`)
-        .order("created_at", { ascending: false });
+      const data = await fetchAllPaginatedRows<any>((from, to) =>
+        admin
+          .from("onboarding_applications")
+          .select("*")
+          .or(`submitted_by.eq.${user.id},email.eq.${user.email}`)
+          .order("created_at", { ascending: false })
+          .range(from, to)
+      );
 
-      if (error) throw new Error(error.message);
       return { ok: true, data: (data || []) as OnboardingApplication[] };
     }
   );

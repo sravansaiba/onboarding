@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -13,11 +13,14 @@ import {
   getUserFromAccessToken,
   requireSuperAdmin,
   requireStaffOrAdmin,
+  isStaffOrSuperAdminRole,
+  isSuperAdminRole,
   type ActionResult,
 } from "./supabase/server";
 import type { OnboardingApplication } from "./onboarding-applications";
 import { writeAuditLog, loggedAction } from "./app-logs";
-import { formatAddress } from "@/src/lib/utils/address";
+import { formatAddress, buildStructuredAddress, parseStructuredAddress } from "@/src/lib/utils/address";
+import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { getServicesForPackage } from "@/src/lib/constants/restaurant-options";
 
 export type RestaurantRecord = {
@@ -28,6 +31,7 @@ export type RestaurantRecord = {
   description: string | null;
   about: string | null;
   address: string;
+  raw_address?: any;
   email: string | null;
   contact: number | null;
   package: string;
@@ -43,14 +47,33 @@ export type RestaurantRecord = {
   background_image_url: string | null;
   pos_domain: string | null;
   theme?: string | null;
+  fullname?: string | null;
+  owner_name?: string | null;
+  fssai_expiry?: string | null;
+  pan_number?: string | null;
+  fullnameaspan?: string | null;
+  registered_business_address?: string | null;
+  bank_accno?: string | null;
+  ifsc_code?: string | null;
+  account_type?: string | null;
+  pan_card_url?: string | null;
+  gst_certificate_url?: string | null;
+  fssai_license_url?: string | null;
+  other_info?: Record<string, any> | null;
   time_zone: string;
   updated_at: string;
   created_at: string;
   images?: StoredAsset[];
+  created_by?: string | null;
+  creator_role?: "staff" | "super_admin" | "admin" | string | null;
+  creator_name?: string | null;
+  creator_email?: string | null;
 };
 
 export type DirectRestaurantInput = {
   restaurant_name: string;
+  fullname?: string;
+  timings?: any;
   domain_name?: string;
   domain_url?: string;
   email?: string;
@@ -63,6 +86,14 @@ export type DirectRestaurantInput = {
   about?: string;
   gst_number?: string;
   fssai_number?: string;
+  fssai_expiry?: string;
+  pan_number?: string;
+  fullnameaspan?: string;
+  registered_business_address?: string;
+  bank_accno?: string;
+  ifsc_code?: string;
+  account_type?: string;
+  other_info?: Record<string, any>;
   pos_domain?: string;
   theme?: string;
   time_zone?: string;
@@ -82,6 +113,14 @@ export type UpdateRestaurantInput = {
   about?: string;
   gst_number?: string;
   fssai_number?: string;
+  fssai_expiry?: string;
+  pan_number?: string;
+  fullnameaspan?: string;
+  registered_business_address?: string;
+  bank_accno?: string;
+  ifsc_code?: string;
+  account_type?: string;
+  other_info?: Record<string, any>;
   pos_domain?: string;
   theme?: string;
   time_zone?: string;
@@ -196,35 +235,59 @@ export async function approveOnboardingApplication(
       const defaultDomainUrl = `${cleanDomain}.marinate360.com`;
       const defaultPosDomain = "pos.marinate360.com";
 
-      const { data: restaurant, error: restaurantError } = await admin
+      let coords: { latitude?: number | null; longitude?: number | null } | undefined = undefined;
+      if (app.mapEmbedUrl && app.mapEmbedUrl.includes("[")) {
+        try {
+          const parsedCoords = JSON.parse(app.mapEmbedUrl);
+          if (Array.isArray(parsedCoords) && parsedCoords.length === 2) {
+            coords = { latitude: parseFloat(parsedCoords[0]), longitude: parseFloat(parsedCoords[1]) };
+          }
+        } catch {}
+      }
+
+      const appInsertPayload: Record<string, any> = {
+        restaurant_name: app.restaurant_name,
+        domain_name: cleanDomain,
+        domain_url: defaultDomainUrl,
+        logo_url: getPublicUrl(images.logo_url),
+        background_image_url: getPublicUrl(images.background_image_url),
+        is_active: true,
+        services: app.services && app.services.length > 0 ? app.services : getServicesForPackage(app.package),
+        address: buildStructuredAddress(app.address, coords),
+        cuisines: app.cuisines,
+        timings: app.timings,
+        contact: numericContact(app.restaurant_primary_contact || app.phone),
+        email: app.email,
+        theme: "light",
+        about: null,
+        delivery_timings: app.delivery_timings,
+        takeaway_timings: app.takeaway_timings,
+        gst_number: String(legal.gst_number ?? "") || null,
+        fssai_number: String(legal.fssai_number ?? "") || null,
+        package: app.package || "marinate-menu",
+        pos_domain: defaultPosDomain,
+        time_zone: "Asia/Kolkata",
+        created_by: reviewer.id,
+      };
+
+      let { data: restaurant, error: restaurantError } = await admin
         .from("restaurants")
-        .insert({
-          restaurant_name: app.restaurant_name,
-          domain_name: cleanDomain,
-          domain_url: defaultDomainUrl,
-          logo_url: getPublicUrl(images.logo_url),
-          background_image_url: getPublicUrl(images.background_image_url),
-          is_active: true,
-          services: app.services && app.services.length > 0 ? app.services : getServicesForPackage(app.package),
-          address: compactAddress(app.address),
-          cuisines: app.cuisines,
-          timings: app.timings,
-          contact: numericContact(app.restaurant_primary_contact || app.phone),
-          email: app.email,
-          theme: "light",
-          about: null,
-          delivery_timings: app.delivery_timings,
-          takeaway_timings: app.takeaway_timings,
-          gst_number: String(legal.gst_number ?? "") || null,
-          fssai_number: String(legal.fssai_number ?? "") || null,
-          package: app.package || "marinate-menu",
-          pos_domain: defaultPosDomain,
-          time_zone: "Asia/Kolkata",
-        })
+        .insert(appInsertPayload)
         .select("id")
         .single();
 
-      if (restaurantError) throw new Error(restaurantError.message);
+      if (restaurantError && restaurantError.message && restaurantError.message.includes("created_by")) {
+        delete appInsertPayload.created_by;
+        const retry = await admin
+          .from("restaurants")
+          .insert(appInsertPayload)
+          .select("id")
+          .single();
+        restaurant = retry.data;
+        restaurantError = retry.error;
+      }
+
+      if (restaurantError || !restaurant) throw new Error(restaurantError?.message || "Failed to create restaurant.");
 
       ctx.restaurantId = restaurant.id;
       await insertRestaurantImageRecords(restaurant.id, allAssets);
@@ -345,18 +408,51 @@ export async function listRestaurants(accessToken: string): Promise<ActionResult
       ctx.actorId = actor.id;
 
       const admin = getSupabaseAdmin();
-      const { data, error } = await admin
-        .from("restaurants")
-        .select("id, restaurant_name, domain_name, domain_url, description, about, address, email, contact, package, is_active, services, cuisines, timings, delivery_timings, takeaway_timings, gst_number, fssai_number, logo_url, background_image_url, pos_domain, time_zone, updated_at, created_at")
-        .order("created_at", { ascending: false })
-        .limit(100);
 
-      if (error) throw new Error(error.message);
+      // Exhaustively fetch all restaurants using pagination (1000 records per batch)
+      const rawRestaurants = await fetchAllPaginatedRows<any>((from, to) =>
+        admin
+          .from("restaurants")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .range(from, to)
+      );
 
-      const formatted = (data ?? []).map((item) => ({
-        ...item,
-        address: formatAddress(item.address),
-      }));
+      // Collect creator IDs to batch-resolve creator details (role, email, name)
+      const creatorIds = Array.from(
+        new Set(rawRestaurants.map((r) => r.created_by).filter((id): id is string => Boolean(id)))
+      );
+
+      const creatorMap = new Map<string, { role: string; email?: string | null; full_name?: string | null }>();
+      if (creatorIds.length > 0) {
+        const profiles = await fetchAllPaginatedRows<any>((from, to) =>
+          admin
+            .from("profiles")
+            .select("id, role, email, first_name, last_name")
+            .in("id", creatorIds)
+            .range(from, to)
+        );
+        for (const p of profiles) {
+          const name = [p.first_name, p.last_name].filter(Boolean).join(" ") || null;
+          creatorMap.set(p.id, {
+            role: p.role,
+            email: p.email,
+            full_name: name,
+          });
+        }
+      }
+
+      const formatted = rawRestaurants.map((item) => {
+        const creator = item.created_by ? creatorMap.get(item.created_by) : undefined;
+        return {
+          ...item,
+          address: formatAddress(item.address),
+          created_by: item.created_by ?? null,
+          creator_role: creator?.role ?? null,
+          creator_email: creator?.email ?? null,
+          creator_name: creator?.full_name ?? null,
+        };
+      });
 
       return { ok: true, data: formatted as RestaurantRecord[] };
     }
@@ -374,7 +470,7 @@ export async function getRestaurantDetails(
   return loggedAction(
     { actionName: "getRestaurantDetails", httpMethod: "GET", httpPath: `/restaurants/${restaurantId}` },
     async (ctx) => {
-      const actor = await requireStaffOrAdmin(accessToken);
+      const actor = await getUserFromAccessToken(accessToken);
       ctx.actorId = actor.id;
       ctx.restaurantId = restaurantId;
 
@@ -383,16 +479,141 @@ export async function getRestaurantDetails(
         .from("restaurants")
         .select("*")
         .eq("id", restaurantId)
-        .single();
+        .maybeSingle();
 
       if (error) throw new Error(error.message);
       if (!data) throw new Error("Restaurant not found.");
 
+      const isStaffOrAdmin = isStaffOrSuperAdminRole(actor.role);
+      const isOwner =
+        data.created_by === actor.id ||
+        (data.email && actor.email && data.email.toLowerCase() === actor.email.toLowerCase()) ||
+        (Array.isArray(actor.restaurant_ids) && actor.restaurant_ids.includes(restaurantId)) ||
+        actor.restaurant_id === restaurantId;
+
+      if (!isStaffOrAdmin && !isOwner) {
+        const { data: userApp } = await admin
+          .from("onboarding_applications")
+          .select("id")
+          .or(`submitted_by.eq.${actor.id},email.eq.${actor.email}`)
+          .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${data.domain_name}`)
+          .maybeSingle();
+
+        if (!userApp) {
+          throw new Error("You are not authorized to view this restaurant.");
+        }
+      }
+
       const images = await listRestaurantImages(restaurantId);
+
+      const panCardAsset = images.find(
+        (img) =>
+          img.image_type === "pan_card" ||
+          img.image_type === "pan" ||
+          (img.image_type === "certificates" && img.original_name.toLowerCase().includes("pan")) ||
+          img.storage_path.toLowerCase().includes("pan")
+      );
+      const gstAsset = images.find(
+        (img) =>
+          img.image_type === "gst_certificate" ||
+          img.image_type === "gst" ||
+          (img.image_type === "certificates" && img.original_name.toLowerCase().includes("gst")) ||
+          img.storage_path.toLowerCase().includes("gst")
+      );
+      const fssaiAsset = images.find(
+        (img) =>
+          img.image_type === "fssai_license" ||
+          img.image_type === "fssai" ||
+          (img.image_type === "certificates" && img.original_name.toLowerCase().includes("fssai")) ||
+          img.storage_path.toLowerCase().includes("fssai")
+      );
+
+      let otherInfo: Record<string, any> = (data.other_info && typeof data.other_info === "object") ? data.other_info : {};
+
+      if (Object.keys(otherInfo).length === 0) {
+        const { data: settingRow } = await admin
+          .from("restaurant_settings")
+          .select("setting_value")
+          .eq("restaurant_id", restaurantId)
+          .eq("setting_key", "other_info")
+          .maybeSingle();
+
+        if (settingRow?.setting_value) {
+          try {
+            otherInfo = typeof settingRow.setting_value === "string" ? JSON.parse(settingRow.setting_value) : settingRow.setting_value;
+          } catch {}
+        }
+      }
+
+      if (Object.keys(otherInfo).length === 0) {
+        const { data: appData } = await admin
+          .from("onboarding_applications")
+          .select("legal, bank, address")
+          .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${data.domain_name}`)
+          .maybeSingle();
+
+        if (appData) {
+          otherInfo = {
+            pan_number: (appData.legal as any)?.pan_number || "",
+            fullnameaspan: (appData.legal as any)?.fullnameaspan || "",
+            registered_business_address: (appData.address as any)?.registered_business_address || "",
+            fssai_expiry: (appData.legal as any)?.fssai_expiry || "",
+            bank_accno: (appData.bank as any)?.bank_accno || "",
+            ifsc_code: (appData.bank as any)?.ifsc_code || "",
+            account_type: (appData.bank as any)?.account_type || "savings",
+          };
+        }
+      }
+
+      let ownerName: string | null = otherInfo.fullname || otherInfo.owner_name || null;
+      if (!ownerName && (restaurantId || data.email)) {
+        try {
+          const { data: prof } = await admin
+            .from("profiles")
+            .select("username, first_name, last_name, email")
+            .or(`restaurant_id.eq.${restaurantId},email.eq.${data.email}`)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (prof) {
+            const combined = [prof.first_name, prof.last_name].filter(Boolean).join(" ");
+            ownerName = combined || prof.username || null;
+          }
+        } catch (e) {}
+      }
+
+      if (!ownerName) {
+        try {
+          const { data: appData } = await admin
+            .from("onboarding_applications")
+            .select("owner_name")
+            .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${data.domain_name}`)
+            .maybeSingle();
+
+          if (appData?.owner_name) {
+            ownerName = appData.owner_name;
+          }
+        } catch (e) {}
+      }
 
       const record: RestaurantRecord = {
         ...data,
-        address: formatAddress(data.address),
+        address: typeof data.address === "string" ? data.address : JSON.stringify(data.address),
+        raw_address: data.address,
+        fullname: ownerName || otherInfo.fullname || null,
+        owner_name: ownerName || otherInfo.owner_name || null,
+        other_info: otherInfo,
+        pan_number: otherInfo.pan_number || null,
+        fullnameaspan: otherInfo.fullnameaspan || null,
+        registered_business_address: otherInfo.registered_business_address || null,
+        fssai_expiry: otherInfo.fssai_expiry || null,
+        bank_accno: otherInfo.bank_accno || null,
+        ifsc_code: otherInfo.ifsc_code || null,
+        account_type: otherInfo.account_type || null,
+        pan_card_url: panCardAsset?.public_url || otherInfo.pan_card_url || null,
+        gst_certificate_url: gstAsset?.public_url || otherInfo.gst_certificate_url || null,
+        fssai_license_url: fssaiAsset?.public_url || otherInfo.fssai_license_url || null,
         images,
       };
 
@@ -407,7 +628,7 @@ export async function getRestaurantDetails(
 
 export async function createRestaurantWithFormData(
   formData: FormData
-): Promise<ActionResult<{ restaurantId: string }>> {
+): Promise<ActionResult<{ restaurantId: string; adminPassword?: string | null; adminEmail?: string | null }>> {
   const accessToken = String(formData.get("accessToken") || "");
   const payloadStr = String(formData.get("payload") || "{}");
   const payload = JSON.parse(payloadStr) as DirectRestaurantInput;
@@ -455,38 +676,190 @@ export async function createRestaurantWithFormData(
       }
 
       const admin = getSupabaseAdmin();
-      const { data, error } = await admin
+
+      const otherInfoToSave = {
+        fullname: payload.fullname || (payload as any).owner_name || (payload.other_info as any)?.fullname || (payload.other_info as any)?.owner_name || null,
+        owner_name: payload.fullname || (payload as any).owner_name || (payload.other_info as any)?.owner_name || (payload.other_info as any)?.fullname || null,
+        pan_number: payload.pan_number || (payload as any).pan || (payload.other_info as any)?.pan_number || null,
+        fullnameaspan: payload.fullnameaspan || (payload.other_info as any)?.fullnameaspan || null,
+        registered_business_address: payload.registered_business_address || (payload.other_info as any)?.registered_business_address || null,
+        fssai_expiry: payload.fssai_expiry || (payload.other_info as any)?.fssai_expiry || null,
+        bank_accno: payload.bank_accno || (payload.other_info as any)?.bank_accno || null,
+        ifsc_code: payload.ifsc_code || (payload.other_info as any)?.ifsc_code || null,
+        account_type: payload.account_type || (payload.other_info as any)?.account_type || "savings",
+      };
+
+      const insertPayload: Record<string, any> = {
+        restaurant_name: payload.restaurant_name.trim(),
+        domain_name: domainName,
+        domain_url: defaultDomainUrl,
+        logo_url: logoUrl,
+        background_image_url: backgroundImageUrl,
+        is_active: true,
+        services: assignedServices,
+        address: buildStructuredAddress(payload.address, {
+          latitude: (payload as any).latitude,
+          longitude: (payload as any).longitude,
+        }),
+        cuisines: payload.cuisines && payload.cuisines.length > 0 ? payload.cuisines : ["North Indian"],
+        timings: payload.timings || { hours: {} },
+        contact: numericContact(payload.contact),
+        email: payload.email ? payload.email.trim() : null,
+        theme: "light",
+        description: payload.description || null,
+        about: payload.about || null,
+        gst_number: payload.gst_number || null,
+        fssai_number: payload.fssai_number || null,
+        other_info: otherInfoToSave,
+        package: payload.package || "marinate-menu",
+        pos_domain: defaultPosDomain,
+        time_zone: payload.time_zone || "Asia/Kolkata",
+        created_by: actor.id,
+      };
+
+      let { data, error } = await admin
         .from("restaurants")
-        .insert({
-          restaurant_name: payload.restaurant_name.trim(),
-          domain_name: domainName,
-          domain_url: defaultDomainUrl,
-          logo_url: logoUrl,
-          background_image_url: backgroundImageUrl,
-          is_active: true,
-          services: assignedServices,
-          address: formatAddress(payload.address),
-          cuisines: payload.cuisines && payload.cuisines.length > 0 ? payload.cuisines : ["North Indian"],
-          timings: { hours: {} },
-          contact: numericContact(payload.contact),
-          email: payload.email ? payload.email.trim() : null,
-          theme: "light",
-          description: payload.description || null,
-          about: payload.about || null,
-          gst_number: payload.gst_number || null,
-          fssai_number: payload.fssai_number || null,
-          package: payload.package || "marinate-menu",
-          pos_domain: defaultPosDomain,
-          time_zone: payload.time_zone || "Asia/Kolkata",
-        })
+        .insert(insertPayload)
         .select("id")
         .single();
 
-      if (error) throw new Error(error.message);
+      if (error && error.message && error.message.includes("other_info")) {
+        delete insertPayload.other_info;
+        const retry = await admin
+          .from("restaurants")
+          .insert(insertPayload)
+          .select("id")
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
+      if (error && error.message && error.message.includes("created_by")) {
+        delete insertPayload.created_by;
+        const retry = await admin
+          .from("restaurants")
+          .insert(insertPayload)
+          .select("id")
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
+      if (error || !data) throw new Error(error?.message || "Failed to create restaurant.");
       ctx.restaurantId = data.id;
 
       if (uploadedAssets.length > 0) {
         await insertRestaurantImageRecords(data.id, uploadedAssets);
+      }
+
+      let generatedAdminPassword: string | null = null;
+      let targetEmail: string | null = null;
+
+      // Provision or link admin user account for the specified owner email
+      if (payload.email && payload.email.trim()) {
+        targetEmail = payload.email.trim().toLowerCase();
+
+        try {
+          const { data: existingProfile } = await admin
+            .from("profiles")
+            .select("id, restaurant_id, restaurant_ids, role")
+            .eq("email", targetEmail)
+            .maybeSingle();
+
+          if (existingProfile) {
+            const existingIds = Array.isArray(existingProfile.restaurant_ids)
+              ? existingProfile.restaurant_ids
+              : existingProfile.restaurant_id
+              ? [existingProfile.restaurant_id]
+              : [];
+            const updatedIds = Array.from(new Set([...existingIds, data.id]));
+
+            await admin
+              .from("profiles")
+              .update({
+                restaurant_id: existingProfile.restaurant_id || data.id,
+                restaurant_ids: updatedIds,
+                role: "admin",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existingProfile.id);
+          } else {
+            // Auto-generate password with marinate@<random 4 digits>
+            const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+            const autoPassword = `marinate@${randomSuffix}`;
+            generatedAdminPassword = autoPassword;
+
+            const { data: createdAuthUser, error: authCreateErr } = await admin.auth.admin.createUser({
+              email: targetEmail,
+              password: autoPassword,
+              email_confirm: true,
+              user_metadata: {
+                username: payload.fullname || targetEmail.split("@")[0],
+                full_name: payload.fullname || targetEmail.split("@")[0],
+                role: "admin",
+              },
+            });
+
+            if (createdAuthUser?.user?.id) {
+              await admin
+                .from("profiles")
+                .upsert({
+                  id: createdAuthUser.user.id,
+                  email: targetEmail,
+                  username: payload.fullname || targetEmail.split("@")[0],
+                  first_name: payload.fullname ? payload.fullname.split(" ")[0] : null,
+                  last_name: payload.fullname && payload.fullname.split(" ").length > 1 ? payload.fullname.split(" ").slice(1).join(" ") : null,
+                  role: "admin",
+                  restaurant_id: data.id,
+                  restaurant_ids: [data.id],
+                  updated_at: new Date().toISOString(),
+                });
+            } else if (authCreateErr) {
+              console.warn("Could not create auth user for owner email:", authCreateErr.message);
+              // If user is already registered in Auth, find them and link/promote to admin
+              try {
+                const { data: listData } = await admin.auth.admin.listUsers();
+                const existingAuth = listData?.users?.find(
+                  (u) => u.email?.toLowerCase() === targetEmail
+                );
+                if (existingAuth) {
+                  await admin.auth.admin.updateUserById(existingAuth.id, {
+                    user_metadata: {
+                      ...(existingAuth.user_metadata || {}),
+                      role: "admin",
+                      full_name: payload.fullname || existingAuth.user_metadata?.full_name,
+                    },
+                  });
+                  await admin.from("profiles").upsert({
+                    id: existingAuth.id,
+                    email: targetEmail,
+                    username: payload.fullname || existingAuth.email?.split("@")[0],
+                    role: "admin",
+                    restaurant_id: data.id,
+                    restaurant_ids: [data.id],
+                    updated_at: new Date().toISOString(),
+                  });
+                }
+              } catch (lookupErr) {
+                console.warn("Failed syncing existing auth user:", lookupErr);
+              }
+            }
+          }
+        } catch (provisionErr: any) {
+          console.warn("Failed provisioning admin user for owner email:", provisionErr?.message || provisionErr);
+        }
+      }
+
+      // Resilient fallback storage in restaurant_settings
+      try {
+        await admin.from("restaurant_settings").upsert({
+          restaurant_id: data.id,
+          setting_key: "other_info",
+          setting_value: JSON.stringify(otherInfoToSave),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "restaurant_id,setting_key" });
+      } catch (settingsErr) {
+        console.warn("Could not save other_info to restaurant_settings on creation:", settingsErr);
       }
 
       void writeAuditLog({
@@ -501,7 +874,14 @@ export async function createRestaurantWithFormData(
       });
 
       revalidatePath("/dashboard");
-      return { ok: true, data: { restaurantId: data.id } };
+      return {
+        ok: true,
+        data: {
+          restaurantId: data.id,
+          adminPassword: generatedAdminPassword,
+          adminEmail: targetEmail,
+        },
+      };
     }
   );
 }
@@ -537,7 +917,7 @@ export async function updateRestaurantWithFormData(
   return loggedAction(
     { actionName: "updateRestaurantWithFormData", httpMethod: "PUT", httpPath: `/restaurants/${restaurantId}` },
     async (ctx) => {
-      const actor = await requireStaffOrAdmin(accessToken);
+      const actor = await getUserFromAccessToken(accessToken);
       ctx.actorId = actor.id;
       ctx.restaurantId = restaurantId;
 
@@ -551,6 +931,34 @@ export async function updateRestaurantWithFormData(
         .single();
 
       if (findError || !existing) throw new Error("Restaurant not found.");
+
+      const isStaffOrAdmin = isStaffOrSuperAdminRole(actor.role);
+      const isOwner =
+        existing.created_by === actor.id ||
+        (existing.email && actor.email && existing.email.toLowerCase() === actor.email.toLowerCase()) ||
+        (Array.isArray(actor.restaurant_ids) && actor.restaurant_ids.includes(restaurantId)) ||
+        actor.restaurant_id === restaurantId;
+
+      if (!isStaffOrAdmin && !isOwner) {
+        const { data: userApp } = await admin
+          .from("onboarding_applications")
+          .select("id")
+          .or(`submitted_by.eq.${actor.id},email.eq.${actor.email}`)
+          .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${existing.domain_name}`)
+          .maybeSingle();
+
+        if (!userApp) {
+          throw new Error("You are not authorized to update this restaurant.");
+        }
+      }
+
+      // Non-staff/non-admins cannot modify platform-managed domains or statuses
+      if (!isStaffOrAdmin) {
+        delete payload.domain_url;
+        delete payload.pos_domain;
+        delete (payload as any).is_active;
+        delete (payload as any).status;
+      }
 
       const domainName = (existing.domain_name || slugify(payload.restaurant_name)).toLowerCase().trim();
 
@@ -609,33 +1017,97 @@ export async function updateRestaurantWithFormData(
       const domainUrlToSave = isSuperAdmin && payload.domain_url ? payload.domain_url.trim() : existing.domain_url;
       const posDomainToSave = isSuperAdmin && payload.pos_domain ? payload.pos_domain.trim() : existing.pos_domain;
 
-      const { data, error } = await admin
+      const otherInfoToSave = {
+        ...((existing.other_info as any) || {}),
+        ...((payload as any).other_info || {}),
+        fullname: payload.fullname ?? (payload as any).other_info?.fullname ?? (payload as any).other_info?.owner_name ?? (existing.other_info as any)?.fullname ?? (existing.other_info as any)?.owner_name ?? null,
+        owner_name: payload.fullname ?? (payload as any).other_info?.owner_name ?? (payload as any).other_info?.fullname ?? (existing.other_info as any)?.owner_name ?? (existing.other_info as any)?.fullname ?? null,
+        pan_number: payload.pan_number ?? (payload as any).other_info?.pan_number ?? (existing.other_info as any)?.pan_number ?? null,
+        fullnameaspan: payload.fullnameaspan ?? (payload as any).other_info?.fullnameaspan ?? (existing.other_info as any)?.fullnameaspan ?? null,
+        registered_business_address: payload.registered_business_address ?? (payload as any).other_info?.registered_business_address ?? (existing.other_info as any)?.registered_business_address ?? null,
+        fssai_expiry: payload.fssai_expiry ?? (payload as any).other_info?.fssai_expiry ?? (existing.other_info as any)?.fssai_expiry ?? null,
+        bank_accno: payload.bank_accno ?? (payload as any).other_info?.bank_accno ?? (existing.other_info as any)?.bank_accno ?? null,
+        ifsc_code: payload.ifsc_code ?? (payload as any).other_info?.ifsc_code ?? (existing.other_info as any)?.ifsc_code ?? null,
+        account_type: payload.account_type ?? (payload as any).other_info?.account_type ?? (existing.other_info as any)?.account_type ?? null,
+      };
+
+      const updateData: Record<string, any> = {
+        restaurant_name: payload.restaurant_name.trim(),
+        domain_url: domainUrlToSave,
+        email: payload.email ? payload.email.trim() : null,
+        contact: numericContact(payload.contact),
+        address: buildStructuredAddress(payload.address, {
+          latitude: (payload as any).latitude !== undefined ? (payload as any).latitude : parseStructuredAddress(existing.address)?.latitude,
+          longitude: (payload as any).longitude !== undefined ? (payload as any).longitude : parseStructuredAddress(existing.address)?.longitude,
+        }),
+        package: payload.package || existing.package,
+        services: assignedServices,
+        cuisines: payload.cuisines && payload.cuisines.length > 0 ? payload.cuisines : existing.cuisines,
+        timings: (payload as any).timings || existing.timings,
+        description: payload.description || null,
+        about: payload.about || null,
+        gst_number: payload.gst_number || null,
+        fssai_number: payload.fssai_number || null,
+        other_info: otherInfoToSave,
+        pos_domain: payload.pos_domain || existing.pos_domain,
+        time_zone: payload.time_zone || existing.time_zone || "Asia/Kolkata",
+        theme: payload.theme || existing.theme || "light",
+        logo_url: newLogoUrl,
+        background_image_url: newBackgroundUrl,
+        updated_at: new Date().toISOString(),
+      };
+
+      let { data, error } = await admin
         .from("restaurants")
-        .update({
-          restaurant_name: payload.restaurant_name.trim(),
-          domain_url: domainUrlToSave,
-          email: payload.email ? payload.email.trim() : null,
-          contact: numericContact(payload.contact),
-          address: formatAddress(payload.address),
-          package: payload.package || existing.package,
-          services: assignedServices,
-          cuisines: payload.cuisines && payload.cuisines.length > 0 ? payload.cuisines : existing.cuisines,
-          description: payload.description || null,
-          about: payload.about || null,
-          gst_number: payload.gst_number || null,
-          fssai_number: payload.fssai_number || null,
-          pos_domain: payload.pos_domain || existing.pos_domain,
-          time_zone: payload.time_zone || existing.time_zone || "Asia/Kolkata",
-          theme: payload.theme || existing.theme || "light",
-          logo_url: newLogoUrl,
-          background_image_url: newBackgroundUrl,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq("id", restaurantId)
         .select("*")
         .single();
 
+      if (error && error.message && error.message.includes("other_info")) {
+        delete updateData.other_info;
+        const retry = await admin
+          .from("restaurants")
+          .update(updateData)
+          .eq("id", restaurantId)
+          .select("*")
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) throw new Error(error.message);
+
+      // Resilient fallback storage in restaurant_settings
+      try {
+        await admin.from("restaurant_settings").upsert({
+          restaurant_id: restaurantId,
+          setting_key: "other_info",
+          setting_value: JSON.stringify(otherInfoToSave),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "restaurant_id,setting_key" });
+      } catch (settingsErr) {
+        console.warn("Could not save to restaurant_settings:", settingsErr);
+      }
+
+      if (payload.fullname) {
+        try {
+          const parts = payload.fullname.trim().split(" ");
+          const firstName = parts[0] || null;
+          const lastName = parts.length > 1 ? parts.slice(1).join(" ") : null;
+          await admin
+            .from("profiles")
+            .update({
+              first_name: firstName,
+              last_name: lastName,
+              username: payload.fullname.trim(),
+              updated_at: new Date().toISOString(),
+            })
+            .or(`restaurant_id.eq.${restaurantId},email.eq.${payload.email || existing.email}`);
+        } catch (profErr) {
+          console.warn("Could not sync profile full name on restaurant update:", profErr);
+        }
+      }
 
       void writeAuditLog({
         source: "updateRestaurantWithFormData",
@@ -653,7 +1125,8 @@ export async function updateRestaurantWithFormData(
         ok: true,
         data: {
           ...data,
-          address: formatAddress(data.address),
+          address: typeof data.address === "string" ? data.address : JSON.stringify(data.address),
+          raw_address: data.address,
           images,
         } as RestaurantRecord,
       };

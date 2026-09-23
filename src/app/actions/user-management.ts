@@ -1,7 +1,14 @@
 "use server";
 
+import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { revalidatePath } from "next/cache";
-import { getSupabaseAdmin, requireSuperAdmin, type ActionResult } from "./supabase/server";
+import {
+  getSupabaseAdmin,
+  requireSuperAdmin,
+  requireStaffOrAdmin,
+  isStaffRole,
+  type ActionResult,
+} from "./supabase/server";
 import { writeAuditLog, loggedAction } from "./app-logs";
 
 export type ManagedUser = {
@@ -50,20 +57,21 @@ export async function listManagedUsers(
   return loggedAction(
     { actionName: "listManagedUsers", httpMethod: "GET", httpPath: "/users" },
     async (ctx) => {
-      const actor = await requireSuperAdmin(accessToken);
+      const actor = await requireStaffOrAdmin(accessToken);
       ctx.actorId = actor.id;
+      const isStaff = isStaffRole(actor.role);
 
       const admin = getSupabaseAdmin();
 
-      // Query profiles and restaurants in parallel for maximum reliability
-      // Filter strictly to platform-level roles (admin, staff, super_admin)
+      // If actor is staff: ONLY return users with role "admin". Hide super_admin and staff users.
+      // If super_admin: return admin, staff, and super_admin as before.
       let query = admin
         .from("profiles")
         .select("id, email, username, first_name, last_name, phone, role, restaurant_id, created_at, updated_at")
-        .in("role", ["admin", "staff", "super_admin"])
+        .in("role", isStaff ? ["admin"] : ["admin", "staff", "super_admin"])
         .order("created_at", { ascending: false });
 
-      if (params?.role && params.role !== "all") {
+      if (!isStaff && params?.role && params.role !== "all") {
         query = query.eq("role", params.role);
       }
 
@@ -104,32 +112,29 @@ export async function listManagedUsers(
         };
       });
 
-      // Filter by search query in memory for flexible multi-field matching
+      // Filter in-memory if search parameter is provided
+      let filtered = users;
       if (params?.search) {
-        const q = params.search.toLowerCase().trim();
-        return {
-          ok: true,
-          data: users.filter(
-            (u) =>
-              (u.email && u.email.toLowerCase().includes(q)) ||
-              (u.username && u.username.toLowerCase().includes(q)) ||
-              (u.first_name && u.first_name.toLowerCase().includes(q)) ||
-              (u.last_name && u.last_name.toLowerCase().includes(q)) ||
-              (u.phone && u.phone.toLowerCase().includes(q)) ||
-              (u.role && u.role.toLowerCase().includes(q)) ||
-              (u.restaurant_name && u.restaurant_name.toLowerCase().includes(q)) ||
-              (u.restaurant_domain && u.restaurant_domain.toLowerCase().includes(q))
-          ),
-        };
+        const q = params.search.toLowerCase();
+        filtered = filtered.filter(
+          (u) =>
+            u.email?.toLowerCase().includes(q) ||
+            u.username?.toLowerCase().includes(q) ||
+            u.first_name?.toLowerCase().includes(q) ||
+            u.last_name?.toLowerCase().includes(q) ||
+            u.role.toLowerCase().includes(q) ||
+            u.restaurant_name?.toLowerCase().includes(q) ||
+            u.restaurant_domain?.toLowerCase().includes(q)
+        );
       }
 
-      return { ok: true, data: users };
+      return { ok: true, data: filtered };
     }
   );
 }
 
 // ---------------------------------------------------------------------------
-// Create a new managed user (auth user + profile)
+// Create managed user (creates auth account + profile + sets restaurant_id)
 // ---------------------------------------------------------------------------
 
 export async function createManagedUser(
@@ -139,8 +144,9 @@ export async function createManagedUser(
   return loggedAction(
     { actionName: "createManagedUser", httpMethod: "POST", httpPath: "/users" },
     async (ctx) => {
-      const actor = await requireSuperAdmin(accessToken);
+      const actor = await requireStaffOrAdmin(accessToken);
       ctx.actorId = actor.id;
+      const isStaff = isStaffRole(actor.role);
 
       if (!input.email || !input.password) {
         throw new Error("Email and password are required.");
@@ -153,7 +159,12 @@ export async function createManagedUser(
       const admin = getSupabaseAdmin();
       const email = input.email.trim().toLowerCase();
       const username = input.username?.trim() || email.split("@")[0];
-      const role = input.role || "staff";
+
+      // Staff can ONLY create users with role "admin"
+      let role = input.role || "admin";
+      if (isStaff) {
+        role = "admin";
+      }
 
       // 1. Create user in Supabase auth
       const { data: authData, error: authError } = await admin.auth.admin.createUser({
@@ -234,10 +245,28 @@ export async function updateManagedUser(
   return loggedAction(
     { actionName: "updateManagedUser", httpMethod: "PUT", httpPath: `/users/${userId}` },
     async (ctx) => {
-      const actor = await requireSuperAdmin(accessToken);
+      const actor = await requireStaffOrAdmin(accessToken);
       ctx.actorId = actor.id;
+      const isStaff = isStaffRole(actor.role);
 
       const admin = getSupabaseAdmin();
+
+      if (isStaff) {
+        const { data: targetProfile, error: targetError } = await admin
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .single();
+
+        if (targetError || !targetProfile) {
+          throw new Error("User not found.");
+        }
+        if (targetProfile.role !== "admin") {
+          throw new Error("Staff members can only manage Admin users.");
+        }
+        // Force role to stay admin
+        input.role = "admin";
+      }
 
       const updatePayload: Record<string, any> = {
         updated_at: new Date().toISOString(),
@@ -290,7 +319,7 @@ export async function updateManagedUser(
 }
 
 // ---------------------------------------------------------------------------
-// Change managed user password
+// Change managed user password (super_admin only)
 // ---------------------------------------------------------------------------
 
 export async function updateManagedUserPassword(
@@ -324,7 +353,7 @@ export async function updateManagedUserPassword(
         entityType: "profile",
         entityId: userId,
         level: "warning",
-        message: `Super admin updated password for user ${userId}.`,
+        message: `Password changed for user ${userId} by super admin.`,
       });
 
       return { ok: true, data: { id: userId } };
@@ -343,10 +372,27 @@ export async function removeUserFromRestaurant(
   return loggedAction(
     { actionName: "removeUserFromRestaurant", httpMethod: "PUT", httpPath: `/users/${userId}/unassign` },
     async (ctx) => {
-      const actor = await requireSuperAdmin(accessToken);
+      const actor = await requireStaffOrAdmin(accessToken);
       ctx.actorId = actor.id;
+      const isStaff = isStaffRole(actor.role);
 
       const admin = getSupabaseAdmin();
+
+      if (isStaff) {
+        const { data: targetProfile, error: targetError } = await admin
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .single();
+
+        if (targetError || !targetProfile) {
+          throw new Error("User not found.");
+        }
+        if (targetProfile.role !== "admin") {
+          throw new Error("Staff members can only manage Admin users.");
+        }
+      }
+
       const { error } = await admin
         .from("profiles")
         .update({
@@ -389,7 +435,7 @@ export async function deleteManagedUser(
       ctx.actorId = actor.id;
 
       if (userId === actor.id) {
-        throw new Error("You cannot delete your own super admin account.");
+        throw new Error("You cannot delete your own account.");
       }
 
       const admin = getSupabaseAdmin();

@@ -41,6 +41,7 @@ export default function CreateRestaurantModal({ accessToken, onClose, onCreated 
   const [posDomain, setPosDomain] = useState("");
 
   // Step 2: Cuisines & Images
+  const [customCuisineInput, setCustomCuisineInput] = useState("");
   const [selectedCuisines, setSelectedCuisines] = useState<string[]>(["North Indian"]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -66,12 +67,28 @@ export default function CreateRestaurantModal({ accessToken, onClose, onCreated 
       }
       setSelectedCuisines(selectedCuisines.filter((c) => c !== cuisine));
     } else {
-      if (selectedCuisines.length >= 3) {
-        toast.error("Maximum 3 cuisines allowed.");
+      if (selectedCuisines.length >= 5) {
+        toast.error("Maximum 5 cuisines allowed.");
         return;
       }
       setSelectedCuisines([...selectedCuisines, cuisine]);
     }
+  };
+
+  const addCustomCuisine = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = customCuisineInput.trim();
+    if (!trimmed) return;
+    if (selectedCuisines.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      toast.error("Cuisine already selected.");
+      return;
+    }
+    if (selectedCuisines.length >= 5) {
+      toast.error("Maximum 5 cuisines allowed.");
+      return;
+    }
+    setSelectedCuisines([...selectedCuisines, trimmed]);
+    setCustomCuisineInput("");
   };
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -326,10 +343,10 @@ export default function CreateRestaurantModal({ accessToken, onClose, onCreated 
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold text-zinc-900">
-                    Select Cuisines (Up to 3) <span className="text-red-500">*</span>
+                    Select Cuisines ({selectedCuisines.length} selected) <span className="text-red-500">*</span>
                   </span>
                   <span className="text-xs font-medium text-zinc-500">
-                    {selectedCuisines.length}/3 selected
+                    Up to 5 cuisines or add custom
                   </span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -351,6 +368,50 @@ export default function CreateRestaurantModal({ accessToken, onClose, onCreated 
                       </button>
                     );
                   })}
+
+                  {/* Custom cuisines tags */}
+                  {selectedCuisines
+                    .filter((c) => !CUISINES.includes(c as any))
+                    .map((custom) => (
+                      <span
+                        key={custom}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-orange-600 text-white px-3.5 py-1.5 text-xs font-semibold shadow-xs"
+                      >
+                        <Check size={12} />
+                        <span>{custom}</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleCuisine(custom as any)}
+                          className="hover:text-zinc-200 ml-1"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                </div>
+
+                {/* Custom Cuisine Input */}
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Add custom cuisine (e.g. Arabian Mandi, Mughlai, Bakery)..."
+                    value={customCuisineInput}
+                    onChange={(e) => setCustomCuisineInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addCustomCuisine();
+                      }
+                    }}
+                    className="flex-1 rounded-lg border border-zinc-200 bg-white px-3.5 py-1.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-orange-500 focus:outline-hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addCustomCuisine()}
+                    className="rounded-lg bg-orange-500 hover:bg-orange-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs transition"
+                  >
+                    Add
+                  </button>
                 </div>
               </div>
 

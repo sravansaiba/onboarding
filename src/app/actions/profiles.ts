@@ -9,6 +9,9 @@ export type AppProfile = {
   username: string | null;
   role: string;
   restaurant_id: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -70,6 +73,83 @@ export async function ensureCustomerProfile(
 
       if (error) throw new Error(error.message);
       return { ok: true, data };
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Update current user profile
+// ---------------------------------------------------------------------------
+
+export async function updateMyProfile(
+  accessToken: string,
+  values: {
+    first_name?: string | null;
+    last_name?: string | null;
+    username?: string | null;
+    phone?: string | null;
+  }
+): Promise<ActionResult<AppProfile>> {
+  return loggedAction(
+    { actionName: "updateMyProfile", httpMethod: "PUT", httpPath: "/profiles/me" },
+    async (ctx) => {
+      const user = await getUserFromAccessToken(accessToken);
+      ctx.actorId = user.id;
+
+      const admin = getSupabaseAdmin();
+      const payload: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (values.first_name !== undefined) payload.first_name = values.first_name?.trim() || null;
+      if (values.last_name !== undefined) payload.last_name = values.last_name?.trim() || null;
+      if (values.username !== undefined) payload.username = values.username?.trim() || null;
+      if (values.phone !== undefined) payload.phone = values.phone?.trim() || null;
+
+      const { data, error } = await admin
+        .from("profiles")
+        .update(payload)
+        .eq("id", user.id)
+        .select("id, email, username, role, restaurant_id, first_name, last_name, phone")
+        .single();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return { ok: true, data };
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Update current user password
+// ---------------------------------------------------------------------------
+
+export async function updateMyPassword(
+  accessToken: string,
+  newPassword: string
+): Promise<ActionResult<{ success: boolean }>> {
+  return loggedAction(
+    { actionName: "updateMyPassword", httpMethod: "POST", httpPath: "/profiles/me/password" },
+    async (ctx) => {
+      const user = await getUserFromAccessToken(accessToken);
+      ctx.actorId = user.id;
+
+      if (!newPassword || newPassword.length < 6) {
+        throw new Error("Password must be at least 6 characters.");
+      }
+
+      const admin = getSupabaseAdmin();
+      const { error } = await admin.auth.admin.updateUserById(user.id, {
+        password: newPassword,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return { ok: true, data: { success: true } };
     }
   );
 }
