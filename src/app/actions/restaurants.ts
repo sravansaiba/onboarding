@@ -101,6 +101,8 @@ export type DirectRestaurantInput = {
 
 export type UpdateRestaurantInput = {
   restaurant_name: string;
+  fullname?: string;
+  owner_name?: string;
   domain_name?: string;
   domain_url?: string;
   email?: string;
